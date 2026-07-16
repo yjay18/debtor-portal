@@ -1,0 +1,81 @@
+{
+  "account": {
+    "accountId": "acc_dispute_001",
+    "debtorFirstName": "Patrick",
+    "debtorLastName": "Byrne",
+    "email": "patrick.byrne@example.test",
+    "phone": "+353831234567",
+    "address": {
+      "line1": "4 Harbour Road",
+      "line2": "Clontarf",
+      "city": "Dublin",
+      "postalCode": "D03 H441",
+      "country": "Ireland"
+    },
+    "preferredContactMethod": "phone",
+    "reference": "TEL-2026-000441",
+    "creditorName": "Example Telecom",
+    "currency": "EUR",
+    "balanceCents": 89400,
+    "status": "overdue",
+    "daysPastDue": 32,
+    "minimumPaymentCents": 2000,
+    "lastPaymentDate": "2025-12-19",
+    "lastPaymentAmountCents": 3000
+  },
+  "billing": {
+    "currentAmountCents": 89400,
+    "lastStatementAmountCents": 47200,
+    "dueDate": "2026-02-07"
+  },
+  "paymentOptions": {
+    "payNowEnabled": true,
+    "promiseToPayEnabled": true,
+    "mockPaymentsEnabled": true,
+    "arrangementEnabled": false,
+    "eligibleArrangementOptions": []
+  },
+  "support": {
+    "humanSupportAvailable": true,
+    "supportPhone": "+35318000001",
+    "supportEmail": "billing-disputes@example.test"
+  },
+  "relatedPeople": [],
+  "promisesToPay": [],
+  "transactions": [
+    {
+      "id": "txn_dispute_001",
+      "type": "payment",
+      "status": "completed",
+      "amountCents": 3000,
+      "currency": "EUR",
+      "description": "Bank transfer",
+      "transactionDate": "2025-12-19"
+    },
+    {
+      "id": "txn_dispute_002",
+      "type": "charge",
+      "status": "posted",
+      "amountCents": 42200,
+      "currency": "EUR",
+      "description": "Roaming and contract fee",
+      "transactionDate": "2026-01-12"
+    }
+  ],
+  "callAppointments": [],
+  "notificationRules": {
+    "sendEmailOnDataChange": true,
+    "pdfPasswordSource": "account_phone_last4"
+  },
+  "faqContext": {
+    "recentStatementReason": "Includes roaming charges and an early contract termination fee",
+    "acceptedPaymentMethods": [
+      "card",
+      "bank_transfer"
+    ]
+  },
+  "riskFlags": {
+    "disputeOpen": false,
+    "requiresHumanForBillingChallenge": true
+  }
+}

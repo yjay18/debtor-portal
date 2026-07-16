@@ -1,0 +1,103 @@
+{
+  "account": {
+    "accountId": "acc_standard_001",
+    "debtorFirstName": "Jane",
+    "debtorLastName": "Murphy",
+    "email": "jane.murphy@example.test",
+    "phone": "+353831234567",
+    "address": {
+      "line1": "12 River Walk",
+      "line2": "Rathmines",
+      "city": "Dublin",
+      "postalCode": "D06 X123",
+      "country": "Ireland"
+    },
+    "preferredContactMethod": "email",
+    "reference": "EI-2026-000123",
+    "creditorName": "Example Energy Ireland",
+    "currency": "EUR",
+    "balanceCents": 128500,
+    "status": "overdue",
+    "daysPastDue": 47,
+    "minimumPaymentCents": 2500,
+    "lastPaymentDate": "2026-01-10",
+    "lastPaymentAmountCents": 5000
+  },
+  "billing": {
+    "currentAmountCents": 128500,
+    "lastStatementAmountCents": 116000,
+    "dueDate": "2026-01-24"
+  },
+  "paymentOptions": {
+    "payNowEnabled": true,
+    "promiseToPayEnabled": true,
+    "mockPaymentsEnabled": true,
+    "arrangementEnabled": false,
+    "eligibleArrangementOptions": []
+  },
+  "support": {
+    "humanSupportAvailable": true,
+    "supportPhone": "+35318000000",
+    "supportEmail": "support@example.test"
+  },
+  "relatedPeople": [
+    {
+      "id": "rel_standard_001",
+      "name": "John Murphy",
+      "email": "john.murphy@example.test",
+      "phone": "+353831987654",
+      "relationship": "spouse",
+      "authorizedToAct": false
+    }
+  ],
+  "promisesToPay": [
+    {
+      "id": "ptp_standard_001",
+      "amountCents": 25000,
+      "currency": "EUR",
+      "dueDate": "2026-07-15",
+      "status": "active",
+      "createdAt": "2026-06-20T10:15:00Z"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "txn_standard_001",
+      "type": "payment",
+      "status": "completed",
+      "amountCents": 5000,
+      "currency": "EUR",
+      "description": "Card payment",
+      "transactionDate": "2026-01-10"
+    },
+    {
+      "id": "txn_standard_002",
+      "type": "charge",
+      "status": "posted",
+      "amountCents": 12500,
+      "currency": "EUR",
+      "description": "Winter usage adjustment",
+      "transactionDate": "2026-01-18"
+    }
+  ],
+  "callAppointments": [
+    {
+      "id": "call_standard_001",
+      "scheduledAt": "2026-07-03T09:30:00+01:00",
+      "phone": "+353831234567",
+      "reason": "Discuss payment options",
+      "status": "scheduled"
+    }
+  ],
+  "notificationRules": {
+    "sendEmailOnDataChange": true,
+    "pdfPasswordSource": "account_phone_last4"
+  },
+  "faqContext": {
+    "recentStatementReason": "Higher winter usage and one missed direct debit",
+    "acceptedPaymentMethods": [
+      "card",
+      "bank_transfer"
+    ]
+  }
+}
