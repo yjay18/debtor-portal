@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   mapAccountContext,
   mapAccountHolderRow,
+  mapAccountHolderUpdate,
   mapAccountMeta,
   mapCallAppointmentRow,
   mapPromiseToPayRow,
@@ -9,6 +10,7 @@ import {
   mapTransactionRow,
   SupabaseAccountRepo,
   type AccountHolderRow,
+  type AccountHolderUpdate,
   type CallAppointmentRow,
   type PromiseToPayRow,
   type RelatedPersonRow,
@@ -355,4 +357,87 @@ it("loads and assembles all persisted account tables", async () => {
     ["transactions", "account_holder_id", "holder-001"],
     ["call_appointments", "account_holder_id", "holder-001"],
   ]);
+});
+
+it("maps account-holder update fields to database columns", () => {
+  expect(mapAccountHolderUpdate({
+    firstName: "Jane",
+    lastName: "Murphy",
+    email: "jane@example.test",
+    phone: "+353831112233",
+    addressLine1: "1 Main Street",
+    addressLine2: "Apartment 2",
+    city: "Dublin",
+    postalCode: "D01 AB12",
+    country: "Ireland",
+  })).toEqual({
+    first_name: "Jane",
+    last_name: "Murphy",
+    email: "jane@example.test",
+    phone: "+353831112233",
+    address_line1: "1 Main Street",
+    address_line2: "Apartment 2",
+    city: "Dublin",
+    postal_code: "D01 AB12",
+    country: "Ireland",
+  });
+});
+
+function createUpdateClient(result: FakeQueryResult) {
+  const maybeSingle = vi.fn().mockResolvedValue(result);
+  const select = vi.fn(() => ({ maybeSingle }));
+  const eq = vi.fn(() => ({ select }));
+  const update = vi.fn(() => ({ eq }));
+  const from = vi.fn(() => ({ update }));
+  return { client: { from }, from, update, eq, select, maybeSingle };
+}
+
+it("updates only supplied fields and returns the persisted holder", async () => {
+  const updatedRow = { ...row, phone: "+353831112233" };
+  const query = createUpdateClient({ data: updatedRow, error: null });
+  const repo = new SupabaseAccountRepo(
+    query.client as never,
+    () => "2026-07-16T16:00:00.000Z",
+  );
+
+  await expect(repo.updateAccountHolder("acc_standard_001", {
+    phone: "+353831112233",
+  })).resolves.toMatchObject({
+    accountId: "acc_standard_001",
+    phone: "+353831112233",
+  });
+  expect(query.from).toHaveBeenCalledWith("account_holders");
+  expect(query.update).toHaveBeenCalledWith({
+    phone: "+353831112233",
+    updated_at: "2026-07-16T16:00:00.000Z",
+  });
+  expect(query.eq).toHaveBeenCalledWith("account_id", "acc_standard_001");
+  expect(query.select).toHaveBeenCalledWith("*");
+});
+
+it.each([
+  {
+    name: "database error",
+    result: { data: null, error: { message: "update unavailable" } },
+    message: "Failed to update account: update unavailable",
+  },
+  {
+    name: "missing account",
+    result: { data: null, error: null },
+    message: "Account not found.",
+  },
+])("fails clearly for $name", async ({ result, message }) => {
+  const query = createUpdateClient(result);
+  await expect(new SupabaseAccountRepo(query.client as never)
+    .updateAccountHolder("acc_standard_001", { phone: "+353831112233" }))
+    .rejects.toThrow(message);
+});
+
+it("rejects an empty update before querying Supabase", async () => {
+  const query = createUpdateClient({ data: row, error: null });
+
+  await expect(new SupabaseAccountRepo(query.client as never)
+    .updateAccountHolder("acc_standard_001", {} as AccountHolderUpdate))
+    .rejects.toThrow("At least one account-holder field is required.");
+  expect(query.from).not.toHaveBeenCalled();
 });

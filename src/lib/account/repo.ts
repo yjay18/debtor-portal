@@ -216,6 +216,33 @@ export function mapCallAppointmentRow(row: CallAppointmentRow): CallAppointment 
 
 type AccountCollections = Pick<AccountContext, "relatedPeople" | "promisesToPay" | "transactions" | "callAppointments">;
 
+export type AccountHolderUpdate = {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  city?: string;
+  postalCode?: string;
+  country?: string;
+};
+// to convert from Typescript camelcase to posgres snake case
+//and we remove undefined entries to avoid overwriting and prevent field data leakage
+export function mapAccountHolderUpdate(fields: AccountHolderUpdate): Record<string, string> {
+  return Object.fromEntries([
+    ["first_name", fields.firstName],
+    ["last_name", fields.lastName],
+    ["email", fields.email],
+    ["phone", fields.phone],
+    ["address_line1", fields.addressLine1],
+    ["address_line2", fields.addressLine2],
+    ["city", fields.city],
+    ["postal_code", fields.postalCode],
+    ["country", fields.country],
+  ].filter((entry): entry is [string, string] => entry[1] !== undefined));
+}
+
 export function mapAccountContext(
   row: AccountHolderRow,
   collections: AccountCollections,
@@ -244,11 +271,16 @@ export interface AccountRepo {
   getAccountContextByAccountId(
     accountId: string,
   ): Promise<AccountContext | null>;
+  updateAccountHolder(
+    accountId: string,
+    fields: AccountHolderUpdate,
+  ): Promise<AccountHolder>;
 }
 //wrapper class to create supa client and fetch acc context
 export class SupabaseAccountRepo implements AccountRepo {
   constructor(
     private readonly client: SupabaseClient = createServerSupabaseClient(),
+    private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
   async getAccountContextByAccountId(
@@ -286,5 +318,29 @@ export class SupabaseAccountRepo implements AccountRepo {
       transactions: (transactions.data ?? []).map((row) => mapTransactionRow(row as TransactionRow)),
       callAppointments: (calls.data ?? []).map((row) => mapCallAppointmentRow(row as CallAppointmentRow)),
     });
+  }
+
+  async updateAccountHolder(
+    accountId: string,
+    fields: AccountHolderUpdate,
+  ): Promise<AccountHolder> {
+    const update = mapAccountHolderUpdate(fields);
+    if (Object.keys(update).length === 0) {
+      throw new Error("At least one account-holder field is required.");
+    }
+
+    const { data, error } = await this.client
+      .from("account_holders")
+      .update({ ...update, updated_at: this.now() })
+      .eq("account_id", accountId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to update account: ${error.message}`);
+    }
+    if (!data) throw new Error("Account not found.");
+
+    return mapAccountHolderRow(data as AccountHolderRow);
   }
 }
