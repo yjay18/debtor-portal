@@ -2,7 +2,9 @@ import { expect, it, vi } from "vitest";
 //tests for the same
 import {
   ConversationStore,
+  mapChatMessageRow,
   mapConversationRow,
+  type ChatMessageRow,
   type ConversationRow,
 } from "./conversation";
 
@@ -49,6 +51,60 @@ it.each([
 ])("rejects dialog state with $name", ({ state }) => {
   expect(() => mapConversationRow({ ...row, pending_action: state }))
     .toThrow();
+});
+
+const accountHolderMessageRow: ChatMessageRow = {
+  id: "message-001",
+  conversation_id: "conversation-001",
+  role: "account_holder",
+  content: "Show me my transactions",
+  action: null,
+  metadata: null,
+  created_at: "2026-07-16T12:06:00Z",
+};
+
+const assistantMessageRow: ChatMessageRow = {
+  ...accountHolderMessageRow,
+  id: "message-002",
+  role: "assistant",
+  content: "Here are your transactions.",
+  action: "read_transactions",
+  metadata: {
+    validationOutcome: "accepted",
+    notificationStatus: "not_required",
+    touchedIds: ["transaction-001"],
+  },
+};
+
+it("maps an account-holder message without assistant audit fields", () => {
+  expect(mapChatMessageRow(accountHolderMessageRow)).toEqual({
+    id: "message-001",
+    conversationId: "conversation-001",
+    role: "account_holder",
+    content: "Show me my transactions",
+    createdAt: "2026-07-16T12:06:00Z",
+  });
+});
+
+it("maps an assistant message with its audit trail", () => {
+  expect(mapChatMessageRow(assistantMessageRow)).toMatchObject({
+    role: "assistant",
+    action: "read_transactions",
+    metadata: {
+      validationOutcome: "accepted",
+      notificationStatus: "not_required",
+      touchedIds: ["transaction-001"],
+    },
+  });
+});
+
+it.each([
+  { name: "unknown role", row: { ...accountHolderMessageRow, role: "system" } },
+  { name: "account-holder action", row: { ...accountHolderMessageRow, action: "read_account" } },
+  { name: "missing assistant action", row: { ...assistantMessageRow, action: null } },
+  { name: "missing validation outcome", row: { ...assistantMessageRow, metadata: {} } },
+])("rejects a message with $name", ({ row: invalidRow }) => {
+  expect(() => mapChatMessageRow(invalidRow)).toThrow();
 });
 
 type FakeResult = { data: unknown; error: { message: string } | null };

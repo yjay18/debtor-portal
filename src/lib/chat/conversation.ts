@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "../supabase/server";
 //using zod to validate the chat states like we did with supabase
-const chatActionSchema = z.enum([
+export const chatActionSchema = z.enum([
   "read_account", "update_account_holder", "read_preferred_contact_method",
   "update_preferred_contact_method", "add_related_person", "update_related_person",
   "remove_related_person", "read_related_people", "create_promise_to_pay",
@@ -41,6 +41,51 @@ export type Conversation = {
   updatedAt: string;
 };
 
+const messageAuditSchema = z.object({
+  validationOutcome: z.string().min(1),
+  notificationStatus: z.string().min(1).optional(),
+  touchedIds: z.array(z.string()).default([]),
+}).catchall(z.unknown());
+
+const messageDetailsSchema = z.discriminatedUnion("role", [
+  z.object({
+    role: z.literal("account_holder"),
+    action: z.null(),
+    metadata: z.null(),
+  }),
+  z.object({
+    role: z.literal("assistant"),
+    action: chatActionSchema,
+    metadata: messageAuditSchema,
+  }),
+]);
+
+export type ChatMessageRow = {
+  id: string;
+  conversation_id: string;
+  role: string;
+  content: string;
+  action: string | null;
+  metadata: unknown | null;
+  created_at: string;
+};
+
+type MessageBase = {
+  id: string;
+  conversationId: string;
+  content: string;
+  createdAt: string;
+};
+
+export type PersistedChatMessage = MessageBase & (
+  | { role: "account_holder"; action?: never; metadata?: never }
+  | {
+      role: "assistant";
+      action: z.infer<typeof chatActionSchema>;
+      metadata: z.infer<typeof messageAuditSchema>;
+    }
+);
+
 export function mapConversationRow(row: ConversationRow): Conversation {
   return {
     id: row.id,
@@ -49,6 +94,20 @@ export function mapConversationRow(row: ConversationRow): Conversation {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+export function mapChatMessageRow(row: ChatMessageRow): PersistedChatMessage {
+  const details = messageDetailsSchema.parse(row);
+  const common = {
+    id: row.id,
+    conversationId: row.conversation_id,
+    content: row.content,
+    createdAt: row.created_at,
+  };
+
+  return details.role === "account_holder"
+    ? { ...common, role: details.role }
+    : { ...common, ...details };
 }
 //tying account holder to the convo for possible legal compliance and audit, and prevent leakage of info between accs
 export class ConversationStore {
