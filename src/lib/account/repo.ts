@@ -1,4 +1,6 @@
 import { z } from "zod";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { createServerSupabaseClient } from "../supabase/server";
 //adding zod library to validate the fields, as typescript cannot inspect at runtime
 import type {
   AccountContext,
@@ -242,4 +244,47 @@ export interface AccountRepo {
   getAccountContextByAccountId(
     accountId: string,
   ): Promise<AccountContext | null>;
+}
+//wrapper class to create supa client and fetch acc context
+export class SupabaseAccountRepo implements AccountRepo {
+  constructor(
+    private readonly client: SupabaseClient = createServerSupabaseClient(),
+  ) {}
+
+  async getAccountContextByAccountId(
+    accountId: string,
+  ): Promise<AccountContext | null> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("*")
+      .eq("account_id", accountId)
+      .maybeSingle();
+
+    if (holderError) {
+      throw new Error(`Failed to load account: ${holderError.message}`);
+    }
+
+    if (!holder) return null;
+
+    const [people, promises, transactions, calls] = await Promise.all([
+      this.client.from("related_people").select("*").eq("account_holder_id", holder.id),
+      this.client.from("promises_to_pay").select("*").eq("account_holder_id", holder.id),
+      this.client.from("transactions").select("*").eq("account_holder_id", holder.id),
+      this.client.from("call_appointments").select("*").eq("account_holder_id", holder.id),
+    ]);
+    const childError = [people, promises, transactions, calls]
+      .map((result) => result.error)
+      .find(Boolean);
+
+    if (childError) {
+      throw new Error(`Failed to load account details: ${childError.message}`);
+    }
+
+    return mapAccountContext(holder as AccountHolderRow, {
+      relatedPeople: (people.data ?? []).map((row) => mapRelatedPersonRow(row as RelatedPersonRow)),
+      promisesToPay: (promises.data ?? []).map((row) => mapPromiseToPayRow(row as PromiseToPayRow)),
+      transactions: (transactions.data ?? []).map((row) => mapTransactionRow(row as TransactionRow)),
+      callAppointments: (calls.data ?? []).map((row) => mapCallAppointmentRow(row as CallAppointmentRow)),
+    });
+  }
 }

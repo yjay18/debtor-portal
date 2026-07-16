@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   mapAccountContext,
   mapAccountHolderRow,
@@ -7,6 +7,7 @@ import {
   mapPromiseToPayRow,
   mapRelatedPersonRow,
   mapTransactionRow,
+  SupabaseAccountRepo,
   type AccountHolderRow,
   type CallAppointmentRow,
   type PromiseToPayRow,
@@ -275,4 +276,83 @@ it.each([
   { name: "malformed metadata", invalidRow: { ...row, meta: {} } },
 ])("rejects account context with $name", ({ invalidRow }) => {
   expect(() => mapAccountContext(invalidRow, collections)).toThrow();
+});
+//supa client query tests
+type FakeQueryResult = { data: unknown; error: { message: string } | null };
+
+function createFakeClient(overrides: Record<string, FakeQueryResult> = {}) {
+  const results: Record<string, FakeQueryResult> = {
+    account_holders: { data: { ...row, meta }, error: null },
+    related_people: { data: [relatedPersonRow], error: null },
+    promises_to_pay: { data: [promiseRow], error: null },
+    transactions: { data: [transactionRow], error: null },
+    call_appointments: { data: [callRow], error: null },
+    ...overrides,
+  };
+  const filters: Array<[string, string, string]> = [];
+  const from = vi.fn((table: string) => ({
+    select: () => ({
+      eq: (column: string, value: string) => {
+        filters.push([table, column, value]);
+        const result = results[table];
+        return table === "account_holders"
+          ? { maybeSingle: () => Promise.resolve(result) }
+          : Promise.resolve(result);
+      },
+    }),
+  }));
+
+  return { client: { from }, filters };
+}
+
+it("returns null when the account does not exist", async () => {
+  const { client } = createFakeClient({
+    account_holders: { data: null, error: null },
+  });
+  const repo = new SupabaseAccountRepo(client as never);
+
+  await expect(repo.getAccountContextByAccountId("missing")).resolves.toBeNull();
+  expect(client.from).toHaveBeenCalledTimes(1);
+});
+
+it("surfaces an account-holder query error", async () => {
+  const { client } = createFakeClient({
+    account_holders: { data: null, error: { message: "holder unavailable" } },
+  });
+
+  await expect(new SupabaseAccountRepo(client as never)
+    .getAccountContextByAccountId("acc_standard_001"))
+    .rejects.toThrow("Failed to load account: holder unavailable");
+});
+
+it("surfaces a child-table query error", async () => {
+  const { client } = createFakeClient({
+    transactions: { data: null, error: { message: "transactions unavailable" } },
+  });
+
+  await expect(new SupabaseAccountRepo(client as never)
+    .getAccountContextByAccountId("acc_standard_001"))
+    .rejects.toThrow("Failed to load account details: transactions unavailable");
+});
+
+it("loads and assembles all persisted account tables", async () => {
+  const { client, filters } = createFakeClient();
+  const context = await new SupabaseAccountRepo(client as never)
+    .getAccountContextByAccountId("acc_standard_001");
+
+  expect(context).toMatchObject({
+    account: { accountId: "acc_standard_001" },
+    billing: { currentAmountCents: 128500 },
+    relatedPeople: [{ id: "person-001" }],
+    promisesToPay: [{ id: "promise-001", amountCents: 25000 }],
+    transactions: [{ id: "transaction-001", amountCents: 5000 }],
+    callAppointments: [{ id: "call-001", status: "scheduled" }],
+  });
+  expect(filters).toEqual([
+    ["account_holders", "account_id", "acc_standard_001"],
+    ["related_people", "account_holder_id", "holder-001"],
+    ["promises_to_pay", "account_holder_id", "holder-001"],
+    ["transactions", "account_holder_id", "holder-001"],
+    ["call_appointments", "account_holder_id", "holder-001"],
+  ]);
 });

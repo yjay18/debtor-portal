@@ -20,10 +20,8 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
-  normalizeLegacyFixture,
   type AccountContext,
   type CallAppointment,
-  type LegacyAccountFixture,
   type PromiseToPay,
   type RelatedPerson,
   type Transaction,
@@ -32,7 +30,7 @@ import type { ChatResponse } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 
 type PortalProps = {
-  fixture: LegacyAccountFixture;
+  accountContext: AccountContext;
 };
 
 type View = "dashboard" | "conversations";
@@ -96,12 +94,11 @@ function getInitials(firstName: string, lastName: string) {
   return `${firstName[0] ?? ""}${lastName[0] ?? ""}`;
 }
 
-export function DebtorPortal({ fixture }: PortalProps) {
+export function DebtorPortal({ accountContext }: PortalProps) {
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const accountContext = normalizeLegacyFixture(fixture);
   const fullName = `${accountContext.account.accountHolderFirstName} ${accountContext.account.accountHolderLastName}`;
 
   const handleSendMessage = async () => {

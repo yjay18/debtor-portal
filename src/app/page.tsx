@@ -1,9 +1,15 @@
-import fixture from "../../fixtures/debtor-standard.json";
+import { notFound } from "next/navigation";
 
 import { DebtorPortal } from "@/components/debtor-portal";
+import { SupabaseAccountRepo } from "@/lib/account/repo";
 
-export default function Home() {
-  // Starter data only: replace this fixture with a real account loaded from
-  // your database once you begin the challenge.
-  return <DebtorPortal fixture={fixture} />;
+export default async function Home() {
+  const accountContext = await new SupabaseAccountRepo()
+    .getAccountContextByAccountId("acc_standard_001");
+
+  if (!accountContext) {
+    notFound();
+  }
+
+  return <DebtorPortal accountContext={accountContext} />;
 }
