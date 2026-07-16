@@ -118,7 +118,7 @@ describe("executeReadChatTurn", () => {
     const response = await executeReadChatTurn(validRequest, {
       conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage },
       repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn() },
-      now: () => "2026-07-16T17:00:00+01:00", parse,
+      now: () => "2026-07-16T17:00:00+01:00", parse, processNotifications: vi.fn(),
     });
 
     expect(addMessage).toHaveBeenNthCalledWith(1, { conversationId: conversation.id, role: "account_holder", content: validRequest.message });
@@ -129,16 +129,29 @@ describe("executeReadChatTurn", () => {
 
   it("routes and audits a parsed account update", async () => {
     const account = normalizeLegacyFixture(standardFixture);
-    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [] } };
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", accountHolderId: "22222222-2222-4222-8222-222222222222", dialogState: { queuedIntents: [] } };
     const updated = { ...account.account, phone: "+353831112233" };
     const updateAccountHolder = vi.fn().mockResolvedValue(updated);
+    const processNotifications = vi.fn().mockResolvedValue({ status: "logged", attemptCount: 1 });
     const addMessage = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "assistant-id", content: "Updated", createdAt: "2026-07-16T17:00:01+01:00" });
     const parse = vi.fn().mockResolvedValue({ action: "update_account_holder", fields: { phone: updated.phone } } as ParsedIntent);
-    const response = await executeReadChatTurn(validRequest, { conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage }, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder }, now: () => "2026-07-16T17:00:00+01:00", parse });
+    const response = await executeReadChatTurn(validRequest, { conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage }, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder }, now: () => "2026-07-16T17:00:00+01:00", parse, processNotifications });
 
     expect(updateAccountHolder).toHaveBeenCalledOnce();
-    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_account_holder", metadata: { validationOutcome: "mutation_succeeded", notificationStatus: "queued", touchedIds: ["acc_standard_001"] } }));
+    expect(processNotifications).toHaveBeenCalledWith(conversation.accountHolderId);
+    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_account_holder", metadata: { validationOutcome: "mutation_succeeded", notificationStatus: "logged", touchedIds: ["acc_standard_001"] } }));
     expect(response.result).toMatchObject({ action: "update_account_holder", notificationQueued: true });
+  });
+
+  it("keeps a committed update successful when notification processing fails", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", accountHolderId: "22222222-2222-4222-8222-222222222222", dialogState: { queuedIntents: [] } };
+    const addMessage = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "assistant-id", content: "Updated", createdAt: "2026-07-16T17:00:01+01:00" });
+    const parse = vi.fn().mockResolvedValue({ action: "update_account_holder", fields: { phone: "+353831112233" } } as ParsedIntent);
+    const response = await executeReadChatTurn(validRequest, { conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage }, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn().mockResolvedValue({ ...account.account, phone: "+353831112233" }) }, now: () => "2026-07-16T17:00:00+01:00", parse, processNotifications: vi.fn().mockRejectedValue(new Error("private delivery detail")) });
+
+    expect(response.result.success).toBe(true);
+    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ metadata: expect.objectContaining({ notificationStatus: "failed" }) }));
   });
 });
 
