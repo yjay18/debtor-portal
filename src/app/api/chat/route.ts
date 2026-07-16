@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
-import { isReadIntent, routeReadAction } from "@/lib/chat/router";
+import { isReadIntent, routeAccountHolderUpdate, routeReadAction } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -49,8 +49,9 @@ type ReadTurnLoaders = {
   now: () => string;
 };
 
-type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations"> & {
+type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations" | "repo"> & {
   conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage">;
+  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder">;
   parse: (input: ParserInput) => Promise<ParsedIntent>;
 };
 
@@ -100,20 +101,46 @@ export async function routeLoadedReadIntent(input: {
     nowIso: input.nowIso,
   });
 }
+
+export async function routeLoadedIntent(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: ParsedIntent;
+  nowIso: string;
+  repo: Pick<AccountRepo, "updateAccountHolder">;
+}): Promise<ChatActionResult> {
+  if (input.intent.action === "update_account_holder") {
+    return routeAccountHolderUpdate({
+      accountId: input.accountId,
+      account: input.account,
+      intent: input.intent,
+      repo: input.repo,
+    });
+  }
+  return routeLoadedReadIntent(input);
+}
 //persists the result of a read turn using an assistant message to store metadata
+// this makes it three actions 
+// Successful phone update → mutation_succeeded
+//Successful account read → read_succeeded
+//Clarify/unsupported     → not_completed
 export async function persistAssistantResult(input: {
   conversationId: string;
   result: ChatActionResult;
   conversations: Pick<ConversationStore, "addMessage">;
 }): Promise<ChatResponse> {
+  const mutation = input.result.action === "update_account_holder";
   const saved = await input.conversations.addMessage({
     conversationId: input.conversationId,
     role: "assistant",
     content: input.result.reply,
     action: input.result.action,
     metadata: {
-      validationOutcome: input.result.success ? "read_succeeded" : "read_not_completed",
-      touchedIds: [],
+      validationOutcome: input.result.success
+        ? mutation ? "mutation_succeeded" : "read_succeeded"
+        : "not_completed",
+      touchedIds: mutation && input.result.account ? [input.result.account.account.accountId] : [],
+      ...(input.result.notificationQueued ? { notificationStatus: "queued" } : {}),
     },
   });
 
@@ -141,11 +168,12 @@ export async function executeReadChatTurn(
     content: request.message,
   });
   const intent = await deps.parse(loaded.parserInput);
-  const result = await routeLoadedReadIntent({
+  const result = await routeLoadedIntent({
     accountId: request.accountId,
     account: loaded.account,
     intent,
     nowIso: loaded.nowIso,
+    repo: deps.repo,
   });
   return persistAssistantResult({
     conversationId: loaded.conversation.id,

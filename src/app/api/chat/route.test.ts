@@ -4,7 +4,7 @@ import standardFixture from "../../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture } from "@/lib/account/types";
 import type { ChatActionResult, ChatResponse } from "@/lib/chat/types";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { buildParserInput, executeReadChatTurn, loadReadTurnContext, parseChatRequest, persistAssistantResult, POST, respondToReadChatTurn, routeLoadedReadIntent } from "./route";
+import { buildParserInput, executeReadChatTurn, loadReadTurnContext, parseChatRequest, persistAssistantResult, POST, respondToReadChatTurn, routeLoadedIntent, routeLoadedReadIntent } from "./route";
 
 const validRequest = { accountId: "acc_standard_001", message: "Show my account" };
 
@@ -64,8 +64,31 @@ describe("routeLoadedReadIntent", () => {
   });
 });
 
+describe("routeLoadedIntent", () => {
+  it("routes account-holder updates to the mutation handler", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const updated = { ...account.account, phone: "+353831112233" };
+    const updateAccountHolder = vi.fn().mockResolvedValue(updated);
+    const intent = { action: "update_account_holder", fields: { phone: "+353831112233" } } as ParsedIntent;
+    const result = await routeLoadedIntent({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder }, nowIso: "unused" });
+
+    expect(updateAccountHolder).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ action: "update_account_holder", success: true });
+  });
+
+  it("keeps every other mutation blocked", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const updateAccountHolder = vi.fn();
+    const intent = { action: "mock_payment", fields: { amountRaw: "50" } } as ParsedIntent;
+    const result = await routeLoadedIntent({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder }, nowIso: "unused" });
+
+    expect(result).toMatchObject({ action: "unsupported", success: false });
+    expect(updateAccountHolder).not.toHaveBeenCalled();
+  });
+});
+
 describe("persistAssistantResult", () => {
-  it.each([[true, "read_succeeded"], [false, "read_not_completed"]] as const)(
+  it.each([[true, "read_succeeded"], [false, "not_completed"]] as const)(
     "persists success=%s with audit outcome %s", async (success, validationOutcome) => {
       const result: ChatActionResult = { action: success ? "read_account" : "unsupported", success, reply: "Saved reply" };
       const addMessage = vi.fn().mockResolvedValue({ id: "message-id", content: result.reply, createdAt: "2026-07-16T17:00:01+01:00" });
@@ -94,7 +117,7 @@ describe("executeReadChatTurn", () => {
     const parse = vi.fn().mockResolvedValue(intent);
     const response = await executeReadChatTurn(validRequest, {
       conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage },
-      repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account) },
+      repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn() },
       now: () => "2026-07-16T17:00:00+01:00", parse,
     });
 
@@ -102,6 +125,20 @@ describe("executeReadChatTurn", () => {
     expect(addMessage.mock.invocationCallOrder[0]).toBeLessThan(parse.mock.invocationCallOrder[0]);
     expect(parse.mock.invocationCallOrder[0]).toBeLessThan(addMessage.mock.invocationCallOrder[1]);
     expect(response).toMatchObject({ conversationId: conversation.id, message: { id: "assistant-id" }, result: { action: "read_account", success: true, account } });
+  });
+
+  it("routes and audits a parsed account update", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [] } };
+    const updated = { ...account.account, phone: "+353831112233" };
+    const updateAccountHolder = vi.fn().mockResolvedValue(updated);
+    const addMessage = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "assistant-id", content: "Updated", createdAt: "2026-07-16T17:00:01+01:00" });
+    const parse = vi.fn().mockResolvedValue({ action: "update_account_holder", fields: { phone: updated.phone } } as ParsedIntent);
+    const response = await executeReadChatTurn(validRequest, { conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage }, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder }, now: () => "2026-07-16T17:00:00+01:00", parse });
+
+    expect(updateAccountHolder).toHaveBeenCalledOnce();
+    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_account_holder", metadata: { validationOutcome: "mutation_succeeded", notificationStatus: "queued", touchedIds: ["acc_standard_001"] } }));
+    expect(response.result).toMatchObject({ action: "update_account_holder", notificationQueued: true });
   });
 });
 
