@@ -44,6 +44,7 @@ type ChatMessage = {
   id: string;
   role: "customer" | "agent";
   content: string;
+  result?: ChatResponse["result"];
 };
 
 function formatCurrency(amountCents: number, currency: string) {
@@ -148,6 +149,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
           id: `agent-${sentAt + 1}`,
           role: "agent",
           content: assistantReply,
+          result: "message" in body ? body.result : undefined,
         },
       ]);
     } catch {
@@ -498,6 +500,7 @@ function ConversationView({
                     {message.role === "customer" ? "You" : "AI Support"}
                   </p>
                   <p>{message.content}</p>
+                  <ChatResultDetails result={message.result} />
                 </div>
               </div>
             ))}
@@ -558,6 +561,40 @@ function ConversationView({
       </form>
     </section>
   );
+}
+
+function ChatResultDetails({
+  result,
+}: {
+  result?: ChatResponse["result"];
+}) {
+  if (!result?.success) return null;
+
+  const account = result.account?.account;
+  const accountRows =
+    result.action === "read_account" && account
+      ? [
+          <InfoRow key="name" icon={UserRound} label="Account holder" value={`${account.accountHolderFirstName} ${account.accountHolderLastName}`} />,
+          <InfoRow key="email" icon={Mail} label="Email" value={account.email} />,
+          <InfoRow key="phone" icon={Phone} label="Phone" value={account.phone} />,
+          <InfoRow key="contact" icon={MessageSquare} label="Preferred contact" value={formatStatus(account.preferredContactMethod)} />,
+          <InfoRow key="balance" icon={Euro} label="Current balance" value={formatCurrency(account.balanceCents, account.currency)} />,
+          <InfoRow key="creditor" icon={LayoutGrid} label="Creditor" value={account.creditorName} />,
+          <InfoRow key="address" icon={MapPin} label="Address" value={formatAddress(account.address)} />,
+          <InfoRow key="payment" icon={CalendarDays} label="Last payment" value={`${formatCurrency(account.lastPaymentAmountCents, account.currency)} on ${formatDate(account.lastPaymentDate)}`} />,
+        ]
+      : result.action === "read_preferred_contact_method" && account
+        ? [<InfoRow key="contact" icon={MessageSquare} label="Preferred contact" value={formatStatus(account.preferredContactMethod)} />]
+        : [];
+  const rows = [
+    ...accountRows,
+    ...(result.relatedPeople ?? []).map((person) => <RelatedPersonRow key={person.id} person={person} />),
+    ...(result.promisesToPay ?? []).map((promise) => <PromiseRow key={promise.id} promise={promise} />),
+    ...(result.transactions ?? []).map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} />),
+    ...(result.callAppointments ?? []).map((appointment) => <CallAppointmentRow key={appointment.id} appointment={appointment} />),
+  ];
+
+  return rows.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2">{rows}</div> : null;
 }
 
 function NavItem({

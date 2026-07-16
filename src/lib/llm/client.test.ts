@@ -57,6 +57,20 @@ it("omits structured output and authorization when disabled locally", async () =
   expect(fetcher.mock.calls[0][1].headers).not.toHaveProperty("Authorization");
 });
 
+it("uses minimal reasoning instead of unsupported temperature for OpenAI GPT-5", async () => {
+  const fetcher = vi.fn().mockResolvedValue(providerResponse("{}"));
+  const client = createLlmClient({
+    LLM_BASE_URL: "https://api.openai.com/v1",
+    LLM_MODEL: "gpt-5-nano-2025-08-07",
+    OPENAI_API_KEY: "test-api-key",
+  }, fetcher);
+
+  await client.completeJson(messages);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(body).toMatchObject({ reasoning_effort: "minimal" });
+  expect(body).not.toHaveProperty("temperature");
+});
+
 it.each([
   { name: "missing base URL", env: { LLM_MODEL: "model" }, message: "Missing LLM_BASE_URL or LLM_MODEL." },
   { name: "missing model", env: { LLM_BASE_URL: "https://api.openai.test/v1" }, message: "Missing LLM_BASE_URL or LLM_MODEL." },
