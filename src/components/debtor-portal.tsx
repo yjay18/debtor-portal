@@ -99,6 +99,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversationId, setConversationId] = useState<string>();
   const fullName = `${accountContext.account.accountHolderFirstName} ${accountContext.account.accountHolderLastName}`;
 
   const handleSendMessage = async () => {
@@ -129,7 +130,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
         body: JSON.stringify({
           accountId: accountContext.account.accountId,
           message: nextMessage,
-          conversationId: "starter-conversation",
+          ...(conversationId ? { conversationId } : {}),
         }),
       });
       const body = (await response.json()) as
@@ -139,6 +140,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
         "message" in body
           ? body.message.content
           : body.error ?? "The chat API did not return a usable response.";
+      if ("message" in body) setConversationId(body.conversationId);
 
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -511,7 +513,7 @@ function ConversationView({
                 No conversation yet
               </h3>
               <p className="mt-3 max-w-md text-sm leading-7 text-slate-600">
-                Send the first message and the thread will call the starter
+                Send the first message and the thread will call the persisted
                 chat API route.
               </p>
             </div>

@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import standardFixture from "../../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture } from "@/lib/account/types";
+import type { ChatActionResult, ChatResponse } from "@/lib/chat/types";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { buildParserInput, loadReadTurnContext, parseChatRequest, POST, routeLoadedReadIntent } from "./route";
+import { buildParserInput, executeReadChatTurn, loadReadTurnContext, parseChatRequest, persistAssistantResult, POST, respondToReadChatTurn, routeLoadedReadIntent } from "./route";
 
 const validRequest = { accountId: "acc_standard_001", message: "Show my account" };
 
@@ -63,6 +64,62 @@ describe("routeLoadedReadIntent", () => {
   });
 });
 
+describe("persistAssistantResult", () => {
+  it.each([[true, "read_succeeded"], [false, "read_not_completed"]] as const)(
+    "persists success=%s with audit outcome %s", async (success, validationOutcome) => {
+      const result: ChatActionResult = { action: success ? "read_account" : "unsupported", success, reply: "Saved reply" };
+      const addMessage = vi.fn().mockResolvedValue({ id: "message-id", content: result.reply, createdAt: "2026-07-16T17:00:01+01:00" });
+      const response = await persistAssistantResult({ conversationId: "11111111-1111-4111-8111-111111111111", result, conversations: { addMessage } });
+
+      expect(addMessage).toHaveBeenCalledWith({
+        conversationId: response.conversationId, role: "assistant", content: result.reply,
+        action: result.action, metadata: { validationOutcome, touchedIds: [] },
+      });
+      expect(response).toEqual({
+        conversationId: "11111111-1111-4111-8111-111111111111",
+        message: { id: "message-id", role: "assistant", content: result.reply, createdAt: "2026-07-16T17:00:01+01:00" }, result,
+      });
+    },
+  );
+});
+
+describe("executeReadChatTurn", () => {
+  it("persists, parses, routes, and returns one read turn in order", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [], awaitingConfirmation: false } };
+    const intent = { action: "read_account", fields: {}, additionalIntents: [], missingFields: [] } as ParsedIntent;
+    const addMessage = vi.fn()
+      .mockResolvedValueOnce({})
+      .mockResolvedValueOnce({ id: "assistant-id", content: "Here are your current account details.", createdAt: "2026-07-16T17:00:01+01:00" });
+    const parse = vi.fn().mockResolvedValue(intent);
+    const response = await executeReadChatTurn(validRequest, {
+      conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage },
+      repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account) },
+      now: () => "2026-07-16T17:00:00+01:00", parse,
+    });
+
+    expect(addMessage).toHaveBeenNthCalledWith(1, { conversationId: conversation.id, role: "account_holder", content: validRequest.message });
+    expect(addMessage.mock.invocationCallOrder[0]).toBeLessThan(parse.mock.invocationCallOrder[0]);
+    expect(parse.mock.invocationCallOrder[0]).toBeLessThan(addMessage.mock.invocationCallOrder[1]);
+    expect(response).toMatchObject({ conversationId: conversation.id, message: { id: "assistant-id" }, result: { action: "read_account", success: true, account } });
+  });
+});
+
+describe("respondToReadChatTurn", () => {
+  it("returns the completed response with status 200", async () => {
+    const body: ChatResponse = { conversationId: "11111111-1111-4111-8111-111111111111", message: { id: "message-id", role: "assistant", content: "Done", createdAt: "2026-07-16T17:00:01+01:00" }, result: { action: "read_account", success: true, reply: "Done" } };
+    const response = await respondToReadChatTurn(validRequest, {} as never, vi.fn().mockResolvedValue(body));
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(body);
+  });
+
+  it("returns a fixed 500 without exposing operational errors", async () => {
+    const response = await respondToReadChatTurn(validRequest, {} as never, vi.fn().mockRejectedValue(new Error("private provider detail")));
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to process the chat request safely." });
+  });
+});
+
 describe("parseChatRequest", () => {
   it("trims valid customer input", () => {
     expect(parseChatRequest({ accountId: " acc_standard_001 ", message: " Show my account " }))
@@ -89,5 +146,14 @@ describe("POST", () => {
     await expect(response.json()).resolves.toEqual({
       error: "A valid accountId and message are required.",
     });
+  });
+
+  it("returns a fixed 500 when server configuration is unavailable", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    const response = await POST(new Request("http://localhost/api/chat", { method: "POST", body: JSON.stringify(validRequest) }));
+    vi.unstubAllEnvs();
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to process the chat request safely." });
   });
 });

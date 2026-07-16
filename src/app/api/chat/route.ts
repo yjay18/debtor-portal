@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import type { AccountRepo } from "@/lib/account/repo";
+import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext } from "@/lib/account/types";
-import type { Conversation, ConversationStore, PersistedChatMessage } from "@/lib/chat/conversation";
+import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
 import { isReadIntent, routeReadAction } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
-import type { ParserInput } from "@/lib/llm/parser";
+import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
+import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const chatRequestSchema = z.object({
   accountId: z.string().trim().min(1),
@@ -47,6 +48,16 @@ type ReadTurnLoaders = {
   repo: Pick<AccountRepo, "getAccountContextByAccountId">;
   now: () => string;
 };
+
+type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations"> & {
+  conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage">;
+  parse: (input: ParserInput) => Promise<ParsedIntent>;
+};
+
+type ReadTurnExecutor = (
+  request: ChatRequest,
+  deps: ReadTurnDependencies,
+) => Promise<ChatResponse>;
 
 export async function loadReadTurnContext(request: ChatRequest, deps: ReadTurnLoaders) {
   const conversation = await deps.conversations.loadOrCreate(
@@ -89,6 +100,74 @@ export async function routeLoadedReadIntent(input: {
     nowIso: input.nowIso,
   });
 }
+//persists the result of a read turn using an assistant message to store metadata
+export async function persistAssistantResult(input: {
+  conversationId: string;
+  result: ChatActionResult;
+  conversations: Pick<ConversationStore, "addMessage">;
+}): Promise<ChatResponse> {
+  const saved = await input.conversations.addMessage({
+    conversationId: input.conversationId,
+    role: "assistant",
+    content: input.result.reply,
+    action: input.result.action,
+    metadata: {
+      validationOutcome: input.result.success ? "read_succeeded" : "read_not_completed",
+      touchedIds: [],
+    },
+  });
+
+  return {
+    conversationId: input.conversationId,
+    message: {
+      id: saved.id,
+      role: "assistant",
+      content: saved.content,
+      createdAt: saved.createdAt,
+    },
+    result: input.result,
+  };
+}
+//coordinates persistent context, message,parser and routing for the read turn
+//parser is kept as a dependency to allow for mocking and other provider specific implementations
+export async function executeReadChatTurn(
+  request: ChatRequest,
+  deps: ReadTurnDependencies,
+): Promise<ChatResponse> {
+  const loaded = await loadReadTurnContext(request, deps);
+  await deps.conversations.addMessage({
+    conversationId: loaded.conversation.id,
+    role: "account_holder",
+    content: request.message,
+  });
+  const intent = await deps.parse(loaded.parserInput);
+  const result = await routeLoadedReadIntent({
+    accountId: request.accountId,
+    account: loaded.account,
+    intent,
+    nowIso: loaded.nowIso,
+  });
+  return persistAssistantResult({
+    conversationId: loaded.conversation.id,
+    result,
+    conversations: deps.conversations,
+  });
+}
+//https wrapper for the read turn executor (and to handle errors)
+export async function respondToReadChatTurn(
+  request: ChatRequest,
+  deps: ReadTurnDependencies,
+  execute: ReadTurnExecutor = executeReadChatTurn,
+) {
+  try {
+    return NextResponse.json(await execute(request, deps));
+  } catch {
+    return NextResponse.json(
+      { error: "Unable to process the chat request safely." },
+      { status: 500 },
+    );
+  }
+}
 
 export async function POST(request: Request) {
   // to catch malformed or invalid fields
@@ -102,22 +181,18 @@ export async function POST(request: Request) {
     );
   }
 
-  const response: ChatResponse = {
-    conversationId: body.conversationId ?? "starter-conversation",
-    message: {
-      id: "starter-message",
-      role: "assistant",
-      content:
-        "The chat API boundary is wired, but the action router has not been implemented yet.",
-      createdAt: new Date().toISOString(),
-    },
-    result: {
-      action: "unsupported",
-      success: false,
-      reply:
-        "The chat API boundary is wired, but the action router has not been implemented yet.",
-    },
-  };
-
-  return NextResponse.json(response, { status: 501 });
+  try {
+    const client = createServerSupabaseClient();
+    return respondToReadChatTurn(body, {
+      conversations: new ConversationStore(client),
+      repo: new SupabaseAccountRepo(client),
+      parse: parseMessage,
+      now: () => new Date().toISOString(),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Unable to process the chat request safely." },
+      { status: 500 },
+    );
+  }
 }
