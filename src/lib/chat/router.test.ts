@@ -78,7 +78,18 @@ describe("routeAccountHolderUpdate", () => {
     const result = await routeAccountHolderUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder } });
 
     expect(updateAccountHolder).toHaveBeenCalledWith("acc_standard_001", { phone: "+353831112233" });
-    expect(result).toMatchObject({ success: true, account: { account: updated }, notificationQueued: true });
+    expect(result).toMatchObject({ success: true, account: { account: updated }, notificationQueued: true,
+      changeSummary: [{ kind: "updated", entity: "account_holder", fields: [{ field: "Phone", before: account.account.phone, after: updated.phone }] }] });
+  });
+
+  it("skips the write and notification for an unchanged value", async () => {
+    const updateAccountHolder = vi.fn();
+    const intent = { action: "update_account_holder", fields: { phone: account.account.phone }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "update_account_holder" }>;
+    const result = await routeAccountHolderUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder } });
+
+    expect(result).toMatchObject({ success: true, changeSummary: [] });
+    expect(result).not.toHaveProperty("notificationQueued");
+    expect(updateAccountHolder).not.toHaveBeenCalled();
   });
 
   it("clarifies invalid fields without writing", async () => {

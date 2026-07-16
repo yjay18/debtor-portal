@@ -15,6 +15,13 @@ export type ChatMessage = {
   createdAt: string;
 };
 
+export type ChangeSummary = {
+  kind: "updated" | "created" | "removed";
+  entity: "account_holder" | "related_person" | "promise_to_pay" | "transaction" | "call_appointment";
+  label: string;
+  fields: Array<{ field: string; before?: string; after?: string }>;
+};
+
 export type ChatAction =
   | "read_account"
   | "update_account_holder"
@@ -47,6 +54,7 @@ export type ChatActionResult = {
   callAppointments?: CallAppointment[];
   missingFields?: string[];
   notificationQueued?: boolean;
+  changeSummary?: ChangeSummary[];
 };
 
 export type ChatRequest = {

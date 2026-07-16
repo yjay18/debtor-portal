@@ -96,12 +96,13 @@ function getInitials(firstName: string, lastName: string) {
 }
 
 export function DebtorPortal({ accountContext }: PortalProps) {
+  const [currentAccountContext, setCurrentAccountContext] = useState(accountContext);
   const [activeView, setActiveView] = useState<View>("dashboard");
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string>();
-  const fullName = `${accountContext.account.accountHolderFirstName} ${accountContext.account.accountHolderLastName}`;
+  const fullName = `${currentAccountContext.account.accountHolderFirstName} ${currentAccountContext.account.accountHolderLastName}`;
 
   const handleSendMessage = async () => {
     const nextMessage = draft.trim();
@@ -129,7 +130,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          accountId: accountContext.account.accountId,
+          accountId: currentAccountContext.account.accountId,
           message: nextMessage,
           ...(conversationId ? { conversationId } : {}),
         }),
@@ -141,7 +142,10 @@ export function DebtorPortal({ accountContext }: PortalProps) {
         "message" in body
           ? body.message.content
           : body.error ?? "The chat API did not return a usable response.";
-      if ("message" in body) setConversationId(body.conversationId);
+      if ("message" in body) {
+        setConversationId(body.conversationId);
+        if (body.result.success && body.result.account) setCurrentAccountContext(body.result.account);
+      }
 
       setMessages((currentMessages) => [
         ...currentMessages,
@@ -207,8 +211,8 @@ export function DebtorPortal({ accountContext }: PortalProps) {
               <Avatar size="lg" className="shadow-sm after:border-slate-300/70">
                 <AvatarFallback className="bg-[linear-gradient(135deg,#3b82f6,#0f172a)] font-semibold text-white">
                   {getInitials(
-                    accountContext.account.accountHolderFirstName,
-                    accountContext.account.accountHolderLastName,
+                    currentAccountContext.account.accountHolderFirstName,
+                    currentAccountContext.account.accountHolderLastName,
                   )}
                 </AvatarFallback>
               </Avatar>
@@ -217,7 +221,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
                   {fullName}
                 </p>
                 <p className="truncate text-sm text-slate-600">
-                  {accountContext.account.email}
+                  {currentAccountContext.account.email}
                 </p>
               </div>
             </div>
@@ -226,7 +230,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
 
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(255,255,255,0.52),rgba(246,250,252,0.8))] p-4 sm:p-6 lg:p-8">
           {activeView === "dashboard" ? (
-            <DashboardView accountContext={accountContext} fullName={fullName} />
+            <DashboardView accountContext={currentAccountContext} fullName={fullName} />
           ) : (
             <ConversationView
               draft={draft}
@@ -594,7 +598,31 @@ function ChatResultDetails({
     ...(result.callAppointments ?? []).map((appointment) => <CallAppointmentRow key={appointment.id} appointment={appointment} />),
   ];
 
-  return rows.length ? <div className="mt-4 grid gap-3 sm:grid-cols-2">{rows}</div> : null;
+  if (!rows.length && !result.changeSummary?.length && !result.notificationQueued) return null;
+  return (
+    <div className="mt-4 space-y-3">
+      {result.changeSummary?.map((summary, summaryIndex) => (
+        <div key={`${summary.entity}-${summaryIndex}`} className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-950">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700">What changed</p>
+          <p className="mt-1 font-semibold">{summary.label}</p>
+          <div className="mt-3 space-y-2 text-xs">
+            {summary.fields.map((field) => (
+              <div key={field.field} className="flex flex-col gap-1 sm:flex-row sm:justify-between">
+                <span className="font-medium">{field.field}</span>
+                <span>{field.before !== undefined ? `${field.before} → ` : ""}{field.after ?? "Removed"}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {result.notificationQueued ? (
+        <div className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs font-medium text-sky-800">
+          <CheckCircle2 className="size-4" /> Notification attempt recorded
+        </div>
+      ) : null}
+      {rows.length ? <div className="grid gap-3 sm:grid-cols-2">{rows}</div> : null}
+    </div>
+  );
 }
 
 function NavItem({

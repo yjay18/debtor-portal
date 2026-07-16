@@ -271,6 +271,9 @@ export interface AccountRepo {
   getAccountContextByAccountId(
     accountId: string,
   ): Promise<AccountContext | null>;
+  getAccountContextByHolderId(
+    accountHolderId: string,
+  ): Promise<AccountContext | null>;
   updateAccountHolder(
     accountId: string,
     fields: AccountHolderUpdate,
@@ -286,10 +289,23 @@ export class SupabaseAccountRepo implements AccountRepo {
   async getAccountContextByAccountId(
     accountId: string,
   ): Promise<AccountContext | null> {
+    return this.loadAccountContext("account_id", accountId);
+  }
+
+  async getAccountContextByHolderId(
+    accountHolderId: string,
+  ): Promise<AccountContext | null> {
+    return this.loadAccountContext("id", accountHolderId);
+  }
+
+  private async loadAccountContext(
+    column: "account_id" | "id",
+    value: string,
+  ): Promise<AccountContext | null> {
     const { data: holder, error: holderError } = await this.client
       .from("account_holders")
       .select("*")
-      .eq("account_id", accountId)
+      .eq(column, value)
       .maybeSingle();
 
     if (holderError) {

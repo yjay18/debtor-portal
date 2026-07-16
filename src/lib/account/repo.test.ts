@@ -359,6 +359,15 @@ it("loads and assembles all persisted account tables", async () => {
   ]);
 });
 
+it("loads a fresh account context by internal holder ID", async () => {
+  const { client, filters } = createFakeClient();
+  const context = await new SupabaseAccountRepo(client as never)
+    .getAccountContextByHolderId("holder-001");
+
+  expect(context?.account.accountId).toBe("acc_standard_001");
+  expect(filters[0]).toEqual(["account_holders", "id", "holder-001"]);
+});
+
 it("maps account-holder update fields to database columns", () => {
   expect(mapAccountHolderUpdate({
     firstName: "Jane",

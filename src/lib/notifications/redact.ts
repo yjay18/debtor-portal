@@ -1,6 +1,6 @@
-import type { QueuedNotificationBatch } from "./processor";
-
-export type RedactedNotificationLog = { event: "notification_delivery_skipped"; attemptCount: number; triggerActions: string[] };
-export function redactNotificationBatch(batch: QueuedNotificationBatch): RedactedNotificationLog {
-  return { event: "notification_delivery_skipped", attemptCount: batch.attemptIds.length, triggerActions: [...batch.triggerActions] };
+//masking email addresses
+export function redactEmailRecipient(email: string): string {
+  const match = /^([^@\s]+)@([^@.\s]+)(\.[^@\s]+)$/.exec(email);
+  if (!match) return "***";
+  return `${match[1][0]}***@${match[2][0]}***${match[3]}`;
 }

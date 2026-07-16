@@ -1,6 +1,7 @@
 import type { AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, CallAppointment } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
+import { buildAccountHolderUpdateSummary, previewAccountHolderUpdate } from "@/lib/chat/change-summary";
 import { validateAccountHolderUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
@@ -46,16 +47,23 @@ export async function routeAccountHolderUpdate(input: {
       reply: validation.intent.clarificationQuestion ?? "What account detail should I use?",
       missingFields: validation.intent.missingFields };
   }
+  const before = input.account.account;
+  const preview = previewAccountHolderUpdate(before, validation.fields);
+  if (buildAccountHolderUpdateSummary(before, preview, validation.fields).length === 0) {
+    return { action: "update_account_holder", success: true,
+      reply: "Those account details are already up to date.", account: input.account, changeSummary: [] };
+  }
   const updated = await input.repo.updateAccountHolder(input.accountId, validation.fields);
   const reply = validation.fields.phone && Object.keys(validation.fields).length === 1
-    ? `Phone updated to ${updated.phone}. A confirmation notification was queued.`
-    : "Your account details were updated. A confirmation notification was queued.";
+    ? `Phone updated to ${updated.phone}.`
+    : "Your account details were updated.";
   return {
     action: "update_account_holder",
     success: true,
     reply,
     account: { ...input.account, account: updated },
     notificationQueued: true,
+    changeSummary: buildAccountHolderUpdateSummary(before, updated, validation.fields),
   };
 }
 

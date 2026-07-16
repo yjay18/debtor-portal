@@ -8,7 +8,7 @@ import { isReadIntent, routeAccountHolderUpdate, routeReadAction } from "@/lib/c
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { logQueuedNotifications, type NotificationBatchStatus } from "@/lib/notifications/processor";
+import { processQueuedNotifications, type NotificationBatchStatus } from "@/lib/notifications/processor";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const chatRequestSchema = z.object({
@@ -54,7 +54,7 @@ type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations" | "repo"> & {
   conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage">;
   repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder">;
   parse: (input: ParserInput) => Promise<ParsedIntent>;
-  processNotifications: (accountHolderId: string) => ReturnType<typeof logQueuedNotifications>;
+  processNotifications: (accountHolderId: string) => ReturnType<typeof processQueuedNotifications>;
 };
 
 type ReadTurnExecutor = (
@@ -133,6 +133,7 @@ export async function persistAssistantResult(input: {
   notificationStatus?: NotificationBatchStatus | "queued";
 }): Promise<ChatResponse> {
   const mutation = input.result.action === "update_account_holder";
+  const mutationChanged = mutation && (input.result.changeSummary?.length ?? 0) > 0;
   const saved = await input.conversations.addMessage({
     conversationId: input.conversationId,
     role: "assistant",
@@ -140,9 +141,9 @@ export async function persistAssistantResult(input: {
     action: input.result.action,
     metadata: {
       validationOutcome: input.result.success
-        ? mutation ? "mutation_succeeded" : "read_succeeded"
+        ? mutation ? mutationChanged ? "mutation_succeeded" : "mutation_noop" : "read_succeeded"
         : "not_completed",
-      touchedIds: mutation && input.result.account ? [input.result.account.account.accountId] : [],
+      touchedIds: mutationChanged && input.result.account ? [input.result.account.account.accountId] : [],
       ...(input.result.notificationQueued
         ? { notificationStatus: input.notificationStatus ?? "queued" }
         : {}),
@@ -190,9 +191,16 @@ export async function executeReadChatTurn(
       notificationStatus = "failed";
     }
   }
+  const completedResult = notificationStatus && result.notificationQueued
+    ? { ...result, reply: `${result.reply} ${notificationStatus === "sent"
+      ? "The confirmation email was sent."
+      : notificationStatus === "logged"
+        ? "The notification attempt was logged because email delivery is not configured."
+        : "Your change was saved, but the confirmation notification could not be delivered."}` }
+    : result;
   return persistAssistantResult({
     conversationId: loaded.conversation.id,
-    result,
+    result: completedResult,
     conversations: deps.conversations,
     notificationStatus,
   });
@@ -231,7 +239,7 @@ export async function POST(request: Request) {
       conversations: new ConversationStore(client),
       repo: new SupabaseAccountRepo(client),
       parse: parseMessage,
-      processNotifications: (accountHolderId) => logQueuedNotifications(client, accountHolderId),
+      processNotifications: (accountHolderId) => processQueuedNotifications(client, accountHolderId),
       now: () => new Date().toISOString(),
     });
   } catch {

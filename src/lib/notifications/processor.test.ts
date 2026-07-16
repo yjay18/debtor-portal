@@ -1,6 +1,8 @@
 import { expect, it, vi } from "vitest";
 
-import { loadQueuedNotificationBatch, logQueuedNotifications, updateNotificationBatchStatus } from "./processor";
+import standardFixture from "../../../fixtures/debtor-standard.json";
+import { normalizeLegacyFixture } from "@/lib/account/types";
+import { loadQueuedNotificationBatch, processQueuedNotifications, updateNotificationBatchStatus } from "./processor";
 
 const accountHolderId = "11111111-1111-4111-8111-111111111111";
 function createClient(result: unknown) {
@@ -34,6 +36,7 @@ it("rejects malformed queue rows", async () => expect(loadQueuedNotificationBatc
 it("rejects cross-account rows", async () => expect(loadQueuedNotificationBatch(createClient({ data: [{ id: "22222222-2222-4222-8222-222222222222", account_holder_id: "99999999-9999-4999-8999-999999999999", trigger_action: "account_holders:update" }], error: null }).client, accountHolderId)).rejects.toThrow("Queued notification account mismatch."));
 
 const batch = { accountHolderId, attemptIds: ["22222222-2222-4222-8222-222222222222"], triggerActions: ["account_holders:update"] };
+const accountSnapshot = normalizeLegacyFixture(standardFixture);
 it.each([["logged", null], ["sent", null], ["failed", "Notification delivery failed."]] as const)("marks a batch %s with safe error data", async (status, errorMessage) => {
   const fake = createUpdateClient({ data: [{ id: batch.attemptIds[0] }], error: null });
   await updateNotificationBatchStatus(fake.client, batch, status);
@@ -46,19 +49,21 @@ it("rejects a status query error", async () => expect(updateNotificationBatchSta
 it("rejects a partial status update", async () => expect(updateNotificationBatchStatus(createUpdateClient({ data: [], error: null }).client, batch, "sent")).rejects.toThrow("Not every queued notification attempt was updated."));
 
 it("does nothing when no notification is queued", async () => {
-  const deps = { load: vi.fn().mockResolvedValue(null), update: vi.fn(), log: vi.fn() };
-  await expect(logQueuedNotifications({} as never, accountHolderId, deps)).resolves.toEqual({ status: "none", attemptCount: 0 });
-  expect(deps.update).not.toHaveBeenCalled(); expect(deps.log).not.toHaveBeenCalled();
+  const deps = { load: vi.fn().mockResolvedValue(null), update: vi.fn(), loadAccount: vi.fn(), notify: vi.fn() };
+  await expect(processQueuedNotifications({} as never, accountHolderId, deps)).resolves.toEqual({ status: "none", attemptCount: 0 });
+  expect(deps.loadAccount).not.toHaveBeenCalled(); expect(deps.notify).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
 });
-it("logs only a redacted batch before marking it logged", async () => {
-  const deps = { load: vi.fn().mockResolvedValue(batch), update: vi.fn(), log: vi.fn() };
-  await expect(logQueuedNotifications({} as never, accountHolderId, deps)).resolves.toEqual({ status: "logged", attemptCount: 1 });
-  expect(deps.log).toHaveBeenCalledWith({ event: "notification_delivery_skipped", attemptCount: 1, triggerActions: batch.triggerActions });
-  expect(deps.update).toHaveBeenCalledWith(expect.anything(), batch, "logged");
-  expect(deps.log.mock.invocationCallOrder[0]).toBeLessThan(deps.update.mock.invocationCallOrder[0]);
+it.each([[true, "sent"], [false, "logged"]] as const)("maps sent=%s delivery to %s", async (sent, status) => {
+  const deps = { load: vi.fn().mockResolvedValue(batch), update: vi.fn(), loadAccount: vi.fn().mockResolvedValue(accountSnapshot),
+    notify: vi.fn().mockResolvedValue({ notificationId: "delivery-id", sent, redactedRecipient: "masked" }) };
+  await expect(processQueuedNotifications({} as never, accountHolderId, deps)).resolves.toEqual({ status, attemptCount: 1 });
+  expect(deps.loadAccount).toHaveBeenCalledWith(accountHolderId);
+  expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({ accountId: "acc_standard_001", accountSnapshot }));
+  expect(deps.update).toHaveBeenCalledWith(expect.anything(), batch, status);
 });
-it("leaves the batch queued when redacted logging fails", async () => {
-  const deps = { load: vi.fn().mockResolvedValue(batch), update: vi.fn(), log: vi.fn(() => { throw new Error("logger unavailable"); }) };
-  await expect(logQueuedNotifications({} as never, accountHolderId, deps)).rejects.toThrow("logger unavailable");
-  expect(deps.update).not.toHaveBeenCalled();
+it("marks the batch failed without exposing a delivery exception", async () => {
+  const deps = { load: vi.fn().mockResolvedValue(batch), update: vi.fn(), loadAccount: vi.fn().mockResolvedValue(accountSnapshot),
+    notify: vi.fn().mockRejectedValue(new Error("private provider detail")) };
+  await expect(processQueuedNotifications({} as never, accountHolderId, deps)).resolves.toEqual({ status: "failed", attemptCount: 1 });
+  expect(deps.update).toHaveBeenCalledWith(expect.anything(), batch, "failed");
 });

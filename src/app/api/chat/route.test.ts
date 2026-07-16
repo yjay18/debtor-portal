@@ -141,6 +141,7 @@ describe("executeReadChatTurn", () => {
     expect(processNotifications).toHaveBeenCalledWith(conversation.accountHolderId);
     expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_account_holder", metadata: { validationOutcome: "mutation_succeeded", notificationStatus: "logged", touchedIds: ["acc_standard_001"] } }));
     expect(response.result).toMatchObject({ action: "update_account_holder", notificationQueued: true });
+    expect(response.result.reply).toContain("notification attempt was logged");
   });
 
   it("keeps a committed update successful when notification processing fails", async () => {
@@ -151,6 +152,7 @@ describe("executeReadChatTurn", () => {
     const response = await executeReadChatTurn(validRequest, { conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage }, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn().mockResolvedValue({ ...account.account, phone: "+353831112233" }) }, now: () => "2026-07-16T17:00:00+01:00", parse, processNotifications: vi.fn().mockRejectedValue(new Error("private delivery detail")) });
 
     expect(response.result.success).toBe(true);
+    expect(response.result.reply).toContain("notification could not be delivered");
     expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ metadata: expect.objectContaining({ notificationStatus: "failed" }) }));
   });
 });

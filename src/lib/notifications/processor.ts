@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { redactNotificationBatch, type RedactedNotificationLog } from "./redact";
+import { SupabaseAccountRepo } from "../account/repo";
+import { sendAccountChangeNotification } from "./account-change-notification";
 //database schema for queued notification attempts
 const queuedAttemptSchema = z.object({ id: z.uuid(), account_holder_id: z.uuid(), trigger_action: z.string().min(1) }).strict();
 const updatedAttemptSchema = z.object({ id: z.uuid() }).strict();
@@ -9,7 +10,8 @@ export type NotificationBatchStatus = "logged" | "sent" | "failed";
 type ProcessorDependencies = {
   load: typeof loadQueuedNotificationBatch;
   update: typeof updateNotificationBatchStatus;
-  log: (entry: RedactedNotificationLog) => void;
+  loadAccount: (accountHolderId: string) => ReturnType<SupabaseAccountRepo["getAccountContextByHolderId"]>;
+  notify: typeof sendAccountChangeNotification;
 };
 //batching notifications
 export async function loadQueuedNotificationBatch(
@@ -45,15 +47,31 @@ export async function updateNotificationBatchStatus(client: SupabaseClient, batc
   }
 }
 
-const processorDependencies: ProcessorDependencies = {
-  load: loadQueuedNotificationBatch,
-  update: updateNotificationBatchStatus,
-  log: (entry) => console.info(entry),
-};
-export async function logQueuedNotifications(client: SupabaseClient, accountHolderId: string, deps: ProcessorDependencies = processorDependencies) {
-  const batch = await deps.load(client, accountHolderId);
+export async function processQueuedNotifications(client: SupabaseClient, accountHolderId: string, deps?: ProcessorDependencies) {
+  const repo = new SupabaseAccountRepo(client);
+  const resolved = deps ?? {
+    load: loadQueuedNotificationBatch,
+    update: updateNotificationBatchStatus,
+    loadAccount: (id: string) => repo.getAccountContextByHolderId(id),
+    notify: sendAccountChangeNotification,
+  };
+  const batch = await resolved.load(client, accountHolderId);
   if (!batch) return { status: "none" as const, attemptCount: 0 };
-  deps.log(redactNotificationBatch(batch));
-  await deps.update(client, batch, "logged");
-  return { status: "logged" as const, attemptCount: batch.attemptIds.length };
+  let status: Exclude<NotificationBatchStatus, "failed">;
+  try {
+    const snapshot = await resolved.loadAccount(accountHolderId);
+    if (!snapshot) throw new Error("Notification account was not found.");
+    const delivery = await resolved.notify({
+      accountId: snapshot.account.accountId,
+      changedBy: "account_holder",
+      changeSummary: batch.triggerActions.join(", "),
+      accountSnapshot: snapshot,
+    });
+    status = delivery.sent ? "sent" : "logged";
+  } catch {
+    await resolved.update(client, batch, "failed");
+    return { status: "failed" as const, attemptCount: batch.attemptIds.length };
+  }
+  await resolved.update(client, batch, status);
+  return { status, attemptCount: batch.attemptIds.length };
 }
