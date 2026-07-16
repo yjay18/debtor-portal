@@ -7,7 +7,7 @@ export type Address = {
   postalCode: string;
   country: string;
 };
-
+//check contactmethod later for its type
 export type AccountHolder = {
   accountId: string;
   accountHolderFirstName: string;
@@ -44,7 +44,7 @@ export type PromiseToPay = {
   status: "active" | "completed" | "cancelled" | "missed";
   createdAt: string;
 };
-
+// keeping in integers to reduce fp errors
 export type Transaction = {
   id: string;
   type: "payment" | "charge" | "fee" | "adjustment";
