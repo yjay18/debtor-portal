@@ -212,3 +212,249 @@ it.each([
     .loadOrCreate("acc_standard_001", conversationId))
     .rejects.toThrow(message);
 });
+
+const persistedConversationId = "00000000-0000-4000-8000-000000000001";
+
+function createMessageClient(overrides: {
+  history?: FakeResult;
+  inserted?: FakeResult;
+} = {}) {
+  const history = overrides.history ?? {
+    data: [
+      { ...accountHolderMessageRow, conversation_id: persistedConversationId },
+      { ...assistantMessageRow, conversation_id: persistedConversationId },
+    ],
+    error: null,
+  };
+  const inserted = overrides.inserted ?? {
+    data: {
+      ...assistantMessageRow,
+      conversation_id: persistedConversationId,
+      metadata: { validationOutcome: "accepted", touchedIds: [] },
+    },
+    error: null,
+  };
+  const order = vi.fn(() => Promise.resolve(history));
+  const insert = vi.fn(() => ({
+    select: () => ({ single: () => Promise.resolve(inserted) }),
+  }));
+  const from = vi.fn(() => ({
+    select: () => ({
+      eq: () => ({ order }),
+    }),
+    insert,
+  }));
+
+  return { client: { from }, from, order, insert };
+}
+
+it("loads messages in chronological order", async () => {
+  const { client, from, order } = createMessageClient();
+  const messages = await new ConversationStore(client as never)
+    .loadMessages(persistedConversationId);
+
+  expect(messages.map((message) => message.role))
+    .toEqual(["account_holder", "assistant"]);
+  expect(from).toHaveBeenCalledWith("chat_messages");
+  expect(order).toHaveBeenCalledWith("created_at", { ascending: true });
+});
+
+it("surfaces a message-history query error", async () => {
+  const { client } = createMessageClient({
+    history: { data: null, error: { message: "history unavailable" } },
+  });
+
+  await expect(new ConversationStore(client as never)
+    .loadMessages(persistedConversationId))
+    .rejects.toThrow("Failed to load conversation messages: history unavailable");
+});
+
+it("inserts an account-holder message with null audit fields", async () => {
+  const insertedRow = {
+    ...accountHolderMessageRow,
+    conversation_id: persistedConversationId,
+  };
+  const { client, insert } = createMessageClient({
+    inserted: { data: insertedRow, error: null },
+  });
+
+  await new ConversationStore(client as never).addMessage({
+    conversationId: persistedConversationId,
+    role: "account_holder",
+    content: "Show me my transactions",
+  });
+  expect(insert).toHaveBeenCalledWith({
+    conversation_id: persistedConversationId,
+    role: "account_holder",
+    content: "Show me my transactions",
+    action: null,
+    metadata: null,
+  });
+});
+
+it("inserts an assistant message with audit metadata", async () => {
+  const { client, insert } = createMessageClient();
+
+  await new ConversationStore(client as never).addMessage({
+    conversationId: persistedConversationId,
+    role: "assistant",
+    content: "Here are your transactions.",
+    action: "read_transactions",
+    metadata: { validationOutcome: "accepted" },
+  });
+  expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+    action: "read_transactions",
+    metadata: { validationOutcome: "accepted", touchedIds: [] },
+  }));
+});
+
+it.each([
+  {
+    name: "non-UUID conversation ID",
+    input: { conversationId: "starter-conversation", role: "account_holder", content: "Hello" },
+  },
+  {
+    name: "empty content",
+    input: { conversationId: persistedConversationId, role: "account_holder", content: "" },
+  },
+  {
+    name: "customer action claim",
+    input: {
+      conversationId: persistedConversationId,
+      role: "account_holder",
+      content: "Hello",
+      action: "read_account",
+    },
+  },
+  {
+    name: "assistant without audit fields",
+    input: {
+      conversationId: persistedConversationId,
+      role: "assistant",
+      content: "Hello",
+    },
+  },
+])("rejects an invalid new message with $name", async ({ input }) => {
+  const { client, insert } = createMessageClient();
+
+  await expect(new ConversationStore(client as never).addMessage(input as never))
+    .rejects.toThrow();
+  expect(insert).not.toHaveBeenCalled();
+});
+
+it("surfaces a message insert error", async () => {
+  const { client } = createMessageClient({
+    inserted: { data: null, error: { message: "message unavailable" } },
+  });
+
+  await expect(new ConversationStore(client as never).addMessage({
+    conversationId: persistedConversationId,
+    role: "account_holder",
+    content: "Hello",
+  })).rejects.toThrow("Failed to save conversation message: message unavailable");
+});
+
+const persistedHolderId = "00000000-0000-4000-8000-000000000002";
+const updatedAt = "2026-07-16T14:30:00.000Z";
+
+function createStateClient(result: FakeResult = {
+  data: {
+    ...row,
+    id: persistedConversationId,
+    account_holder_id: persistedHolderId,
+    pending_action: {
+      queuedIntents: [{ action: "read_transactions", fields: {} }],
+      awaitingConfirmation: true,
+    },
+    updated_at: updatedAt,
+  },
+  error: null,
+}) {
+  const filters: Array<[string, string]> = [];
+  const update = vi.fn(() => ({
+    eq: (column: string, value: string) => {
+      filters.push([column, value]);
+      return { eq: (nextColumn: string, nextValue: string) => {
+        filters.push([nextColumn, nextValue]);
+        return {
+          select: () => ({ maybeSingle: () => Promise.resolve(result) }),
+        };
+      } };
+    },
+  }));
+  const from = vi.fn(() => ({ update }));
+
+  return { client: { from }, from, update, filters };
+}
+
+it("updates validated dialog state within its account", async () => {
+  const { client, from, update, filters } = createStateClient();
+  const conversation = await new ConversationStore(client as never, () => updatedAt)
+    .updateDialogState(
+      { id: persistedConversationId, accountHolderId: persistedHolderId },
+      {
+        queuedIntents: [{ action: "read_transactions", fields: {} }],
+        awaitingConfirmation: true,
+      },
+    );
+
+  expect(from).toHaveBeenCalledWith("conversations");
+  expect(update).toHaveBeenCalledWith({
+    pending_action: {
+      queuedIntents: [{ action: "read_transactions", fields: {} }],
+      awaitingConfirmation: true,
+    },
+    updated_at: updatedAt,
+  });
+  expect(filters).toEqual([
+    ["id", persistedConversationId],
+    ["account_holder_id", persistedHolderId],
+  ]);
+  expect(conversation.updatedAt).toBe(updatedAt);
+});
+
+it.each([
+  {
+    name: "invalid conversation ID",
+    conversation: { id: "starter-conversation", accountHolderId: persistedHolderId },
+    state: {},
+  },
+  {
+    name: "invalid account-holder ID",
+    conversation: { id: persistedConversationId, accountHolderId: "holder-001" },
+    state: {},
+  },
+  {
+    name: "invalid dialog action",
+    conversation: { id: persistedConversationId, accountHolderId: persistedHolderId },
+    state: { queuedIntents: [{ action: "delete_account", fields: {} }] },
+  },
+])("rejects $name before updating", async ({ conversation, state }) => {
+  const { client, update } = createStateClient();
+
+  await expect(new ConversationStore(client as never)
+    .updateDialogState(conversation, state as never))
+    .rejects.toThrow();
+  expect(update).not.toHaveBeenCalled();
+});
+
+it.each([
+  {
+    name: "database error",
+    result: { data: null, error: { message: "state unavailable" } },
+    message: "Failed to update conversation state: state unavailable",
+  },
+  {
+    name: "ownership mismatch",
+    result: { data: null, error: null },
+    message: "Conversation not found for account.",
+  },
+])("fails safely for a state $name", async ({ result, message }) => {
+  const { client } = createStateClient(result);
+
+  await expect(new ConversationStore(client as never)
+    .updateDialogState(
+      { id: persistedConversationId, accountHolderId: persistedHolderId },
+      {},
+    )).rejects.toThrow(message);
+});

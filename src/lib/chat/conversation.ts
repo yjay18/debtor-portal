@@ -24,6 +24,7 @@ export const dialogStateSchema = z.object({
 });
 
 export type DialogState = z.infer<typeof dialogStateSchema>;
+export type DialogStateInput = z.input<typeof dialogStateSchema>;
 
 export type ConversationRow = {
   id: string;
@@ -59,6 +60,23 @@ const messageDetailsSchema = z.discriminatedUnion("role", [
     metadata: messageAuditSchema,
   }),
 ]);
+//enforcing authority fields using zod to enforce message structure
+const newMessageSchema = z.discriminatedUnion("role", [
+  z.object({
+    conversationId: z.uuid(),
+    role: z.literal("account_holder"),
+    content: z.string().min(1),
+  }).strict(),
+  z.object({
+    conversationId: z.uuid(),
+    role: z.literal("assistant"),
+    content: z.string().min(1),
+    action: chatActionSchema,
+    metadata: messageAuditSchema,
+  }).strict(),
+]);
+
+export type NewChatMessage = z.input<typeof newMessageSchema>;
 
 export type ChatMessageRow = {
   id: string;
@@ -113,6 +131,7 @@ export function mapChatMessageRow(row: ChatMessageRow): PersistedChatMessage {
 export class ConversationStore {
   constructor(
     private readonly client: SupabaseClient = createServerSupabaseClient(),
+    private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
   async loadOrCreate(
@@ -155,6 +174,75 @@ export class ConversationStore {
     if (error || !data) {
       throw new Error(`Failed to create conversation: ${error?.message ?? "no row returned"}`);
     }
+
+    return mapConversationRow(data as ConversationRow);
+  }
+//loading messages and ensuring no cross loading data leaks between accounts
+  async loadMessages(conversationId: string): Promise<PersistedChatMessage[]> {
+    const validId = z.uuid().parse(conversationId);
+    const { data, error } = await this.client
+      .from("chat_messages")
+      .select("*")
+      .eq("conversation_id", validId)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      throw new Error(`Failed to load conversation messages: ${error.message}`);
+    }
+
+    return (data ?? []).map((message) =>
+      mapChatMessageRow(message as ChatMessageRow));
+  }
+
+  async addMessage(input: NewChatMessage): Promise<PersistedChatMessage> {
+    const message = newMessageSchema.parse(input);
+    const insertRow = message.role === "account_holder"
+      ? {
+          conversation_id: message.conversationId,
+          role: message.role,
+          content: message.content,
+          action: null,
+          metadata: null,
+        }
+      : {
+          conversation_id: message.conversationId,
+          role: message.role,
+          content: message.content,
+          action: message.action,
+          metadata: message.metadata,
+        };
+    const { data, error } = await this.client
+      .from("chat_messages")
+      .insert(insertRow)
+      .select("*")
+      .single();
+
+    if (error || !data) {
+      throw new Error(`Failed to save conversation message: ${error?.message ?? "no row returned"}`);
+    }
+
+    return mapChatMessageRow(data as ChatMessageRow);
+  }
+//both IDs are required to ensure the conversation belongs to the account holder to prevent cross-account hacking or manipulation
+  async updateDialogState(
+    conversation: Pick<Conversation, "id" | "accountHolderId">,
+    input: DialogStateInput,
+  ): Promise<Conversation> {
+    const conversationId = z.uuid().parse(conversation.id);
+    const accountHolderId = z.uuid().parse(conversation.accountHolderId);
+    const dialogState = dialogStateSchema.parse(input);
+    const { data, error } = await this.client
+      .from("conversations")
+      .update({ pending_action: dialogState, updated_at: this.now() })
+      .eq("id", conversationId)
+      .eq("account_holder_id", accountHolderId)
+      .select("*")
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(`Failed to update conversation state: ${error.message}`);
+    }
+    if (!data) throw new Error("Conversation not found for account.");
 
     return mapConversationRow(data as ConversationRow);
   }
