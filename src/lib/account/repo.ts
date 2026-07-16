@@ -1,4 +1,42 @@
+import { z } from "zod";
+//adding zod library to validate the fields, as typescript cannot inspect at runtime
 import type { AccountContext, AccountHolder } from "./types";
+
+const accountMetaSchema = z.object({
+  support: z.object({
+    humanSupportAvailable: z.boolean(),
+    supportPhone: z.string().min(1),
+    supportEmail: z.email(),
+  }),
+  paymentOptions: z.object({
+    payNowEnabled: z.boolean(),
+    promiseToPayEnabled: z.boolean(),
+    mockPaymentsEnabled: z.boolean(),
+    arrangementEnabled: z.boolean(),
+    eligibleArrangementOptions: z.array(
+      z.object({
+        frequency: z.string().min(1),
+        installments: z.number().int().positive(),
+        suggestedAmountCents: z.number().int().nonnegative(),
+      }),
+    ),
+  }),
+  notificationRules: z.object({
+    sendEmailOnDataChange: z.boolean(),
+    pdfPasswordSource: z.literal("account_phone_last4"),
+  }),
+  faqContext: z
+    .object({
+      recentStatementReason: z.string().optional(),
+      acceptedPaymentMethods: z.array(z.string()).optional(),
+    })
+    .optional(),
+  riskFlags: z.record(z.string(), z.boolean()).optional(),
+});
+
+export function mapAccountMeta(meta: unknown) {
+  return accountMetaSchema.parse(meta);
+}
 
 export type AccountHolderRow = {
   id: string;
