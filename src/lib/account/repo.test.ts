@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { mapAccountHolderRow, type AccountHolderRow } from "./repo";
+import {
+  mapAccountHolderRow,
+  mapAccountMeta,
+  type AccountHolderRow,
+} from "./repo";
 //testing important fields with this one
 const row: AccountHolderRow = {
   id: "holder-001",
@@ -65,4 +69,63 @@ it("rejects a missing last payment date", () => {
   expect(() => mapAccountHolderRow(invalidRow)).toThrow(
     "Account holder is missing a last payment date.",
   );
+});
+
+const meta = {
+  support: {
+    humanSupportAvailable: true,
+    supportPhone: "+35318000000",
+    supportEmail: "support@example.test",
+  },
+  paymentOptions: {
+    payNowEnabled: true,
+    promiseToPayEnabled: true,
+    mockPaymentsEnabled: true,
+    arrangementEnabled: false,
+    eligibleArrangementOptions: [],
+  },
+  notificationRules: {
+    sendEmailOnDataChange: true,
+    pdfPasswordSource: "account_phone_last4",
+  },
+  faqContext: {
+    recentStatementReason: "Higher winter usage",
+    acceptedPaymentMethods: ["card"],
+  },
+  riskFlags: { disputeOpen: false },
+};
+
+it("validates complete account metadata", () => {
+  expect(mapAccountMeta(meta)).toEqual(meta);
+});
+
+it.each([
+  { name: "missing required sections", value: {} },
+  {
+    name: "invalid support email",
+    value: { ...meta, support: { ...meta.support, supportEmail: "invalid" } },
+  },
+  {
+    name: "string payment flag",
+    value: { ...meta, paymentOptions: { ...meta.paymentOptions, payNowEnabled: "yes" } },
+  },
+  {
+    name: "invalid arrangement values",
+    value: {
+      ...meta,
+      paymentOptions: {
+        ...meta.paymentOptions,
+        eligibleArrangementOptions: [
+          { frequency: "", installments: 0, suggestedAmountCents: -1 },
+        ],
+      },
+    },
+  },
+  {
+    name: "wrong PDF password source",
+    value: { ...meta, notificationRules: { ...meta.notificationRules, pdfPasswordSource: "phone" } },
+  },
+  { name: "non-boolean risk flag", value: { ...meta, riskFlags: { disputeOpen: "no" } } },
+])("rejects metadata with $name", ({ value }) => {
+  expect(() => mapAccountMeta(value)).toThrow();
 });
