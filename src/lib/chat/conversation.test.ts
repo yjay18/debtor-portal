@@ -1,6 +1,7 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 //tests for the same
 import {
+  ConversationStore,
   mapConversationRow,
   type ConversationRow,
 } from "./conversation";
@@ -48,4 +49,110 @@ it.each([
 ])("rejects dialog state with $name", ({ state }) => {
   expect(() => mapConversationRow({ ...row, pending_action: state }))
     .toThrow();
+});
+
+type FakeResult = { data: unknown; error: { message: string } | null };
+
+function createFakeClient(overrides: {
+  holder?: FakeResult;
+  conversation?: FakeResult;
+  inserted?: FakeResult;
+} = {}) {
+  const holder = overrides.holder ?? { data: { id: "holder-001" }, error: null };
+  const conversation = overrides.conversation ?? { data: row, error: null };
+  const inserted = overrides.inserted ?? {
+    data: { ...row, id: "conversation-new", pending_action: null },
+    error: null,
+  };
+  const filters: Array<[string, string, string]> = [];
+  const insert = vi.fn(() => ({
+    select: () => ({ single: () => Promise.resolve(inserted) }),
+  }));
+  const from = vi.fn((table: string) => table === "account_holders" ? {
+    select: () => ({
+      eq: (column: string, value: string) => {
+        filters.push([table, column, value]);
+        return { maybeSingle: () => Promise.resolve(holder) };
+      },
+    }),
+  } : {
+    select: () => ({
+      eq: (column: string, value: string) => {
+        filters.push([table, column, value]);
+        return { eq: (nextColumn: string, nextValue: string) => {
+          filters.push([table, nextColumn, nextValue]);
+          return { maybeSingle: () => Promise.resolve(conversation) };
+        } };
+      },
+    }),
+    insert,
+  });
+
+  return { client: { from }, filters, insert };
+}
+
+it("loads a conversation scoped to its account holder", async () => {
+  const { client, filters, insert } = createFakeClient();
+  const conversation = await new ConversationStore(client as never)
+    .loadOrCreate("acc_standard_001", "conversation-001");
+
+  expect(conversation.id).toBe("conversation-001");
+  expect(filters).toEqual([
+    ["account_holders", "account_id", "acc_standard_001"],
+    ["conversations", "id", "conversation-001"],
+    ["conversations", "account_holder_id", "holder-001"],
+  ]);
+  expect(insert).not.toHaveBeenCalled();
+});
+
+it("creates a conversation when no ID is supplied", async () => {
+  const { client, insert } = createFakeClient();
+  const conversation = await new ConversationStore(client as never)
+    .loadOrCreate("acc_standard_001");
+
+  expect(conversation).toMatchObject({
+    id: "conversation-new",
+    accountHolderId: "holder-001",
+    dialogState: { queuedIntents: [], awaitingConfirmation: false },
+  });
+  expect(insert).toHaveBeenCalledWith({ account_holder_id: "holder-001" });
+});
+
+it.each([
+  {
+    name: "account query error",
+    overrides: { holder: { data: null, error: { message: "account unavailable" } } },
+    conversationId: undefined,
+    message: "Failed to resolve account: account unavailable",
+  },
+  {
+    name: "missing account",
+    overrides: { holder: { data: null, error: null } },
+    conversationId: undefined,
+    message: "Account not found.",
+  },
+  {
+    name: "conversation query error",
+    overrides: { conversation: { data: null, error: { message: "chat unavailable" } } },
+    conversationId: "conversation-001",
+    message: "Failed to load conversation: chat unavailable",
+  },
+  {
+    name: "conversation outside account",
+    overrides: { conversation: { data: null, error: null } },
+    conversationId: "conversation-001",
+    message: "Conversation not found for account.",
+  },
+  {
+    name: "insert error",
+    overrides: { inserted: { data: null, error: { message: "insert unavailable" } } },
+    conversationId: undefined,
+    message: "Failed to create conversation: insert unavailable",
+  },
+])("fails safely for $name", async ({ overrides, conversationId, message }) => {
+  const { client } = createFakeClient(overrides);
+
+  await expect(new ConversationStore(client as never)
+    .loadOrCreate("acc_standard_001", conversationId))
+    .rejects.toThrow(message);
 });
