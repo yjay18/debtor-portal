@@ -1,6 +1,7 @@
 import type { AccountRepo } from "@/lib/account/repo";
-import type { CallAppointment } from "@/lib/account/types";
+import type { AccountContext, CallAppointment } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
+import { validateAccountHolderUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
 export type ReadAction =
@@ -16,6 +17,7 @@ export type ReadIntent = Extract<
   ParsedIntent,
   { action: ReadAction | "clarify" | "unsupported" }
 >;
+type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 //from routing
 const readIntentActions = new Set<ParsedIntent["action"]>([
   "read_account",
@@ -30,6 +32,31 @@ const readIntentActions = new Set<ParsedIntent["action"]>([
 
 export function isReadIntent(intent: ParsedIntent): intent is ReadIntent {
   return readIntentActions.has(intent.action);
+}
+//update acc and notification queue
+export async function routeAccountHolderUpdate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: AccountUpdateIntent;
+  repo: Pick<AccountRepo, "updateAccountHolder">;
+}): Promise<ChatActionResult> {
+  const validation = validateAccountHolderUpdate(input.intent);
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false,
+      reply: validation.intent.clarificationQuestion ?? "What account detail should I use?",
+      missingFields: validation.intent.missingFields };
+  }
+  const updated = await input.repo.updateAccountHolder(input.accountId, validation.fields);
+  const reply = validation.fields.phone && Object.keys(validation.fields).length === 1
+    ? `Phone updated to ${updated.phone}. A confirmation notification was queued.`
+    : "Your account details were updated. A confirmation notification was queued.";
+  return {
+    action: "update_account_holder",
+    success: true,
+    reply,
+    account: { ...input.account, account: updated },
+    notificationQueued: true,
+  };
 }
 
 type ReadRepo = Pick<AccountRepo, "getAccountContextByAccountId">;

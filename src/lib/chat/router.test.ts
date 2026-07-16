@@ -6,6 +6,7 @@ import type { ParsedIntent } from "@/lib/llm/parser-schema";
 import {
   futureScheduledCalls,
   isReadIntent,
+  routeAccountHolderUpdate,
   routeReadAction,
   type ReadAction,
   type ReadIntent,
@@ -66,6 +67,27 @@ describe("isReadIntent", () => {
     "mock_payment", "book_call_appointment",
   ] as const)("rejects the mutation action %s", (action) => {
     expect(isReadIntent({ action } as ParsedIntent)).toBe(false);
+  });
+});
+
+describe("routeAccountHolderUpdate", () => {
+  it("validates, writes, and returns the persisted account holder", async () => {
+    const updated = { ...account.account, phone: "+353831112233" };
+    const updateAccountHolder = vi.fn().mockResolvedValue(updated);
+    const intent: Extract<ParsedIntent, { action: "update_account_holder" }> = { action: "update_account_holder", fields: { phone: "\n+353831112233 " }, additionalIntents: [], missingFields: [] };
+    const result = await routeAccountHolderUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder } });
+
+    expect(updateAccountHolder).toHaveBeenCalledWith("acc_standard_001", { phone: "+353831112233" });
+    expect(result).toMatchObject({ success: true, account: { account: updated }, notificationQueued: true });
+  });
+
+  it("clarifies invalid fields without writing", async () => {
+    const updateAccountHolder = vi.fn();
+    const intent: Extract<ParsedIntent, { action: "update_account_holder" }> = { action: "update_account_holder", fields: { phone: "invalid" }, additionalIntents: [], missingFields: [] };
+    const result = await routeAccountHolderUpdate({ accountId: "unused", account, intent, repo: { updateAccountHolder } });
+
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["phone"] });
+    expect(updateAccountHolder).not.toHaveBeenCalled();
   });
 });
 
