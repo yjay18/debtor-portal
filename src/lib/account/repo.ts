@@ -1,6 +1,13 @@
 import { z } from "zod";
 //adding zod library to validate the fields, as typescript cannot inspect at runtime
-import type { AccountContext, AccountHolder } from "./types";
+import type {
+  AccountContext,
+  AccountHolder,
+  CallAppointment,
+  PromiseToPay,
+  RelatedPerson,
+  Transaction,
+} from "./types";
 
 const accountMetaSchema = z.object({
   support: z.object({
@@ -106,6 +113,128 @@ export function mapAccountHolderRow(row: AccountHolderRow): AccountHolder {
     minimumPaymentCents: row.minimum_payment_cents,
     lastPaymentDate: row.last_payment_date,
     lastPaymentAmountCents: row.last_payment_amount_cents,
+  };
+}
+
+export type RelatedPersonRow = {
+  id: string;
+  account_holder_id: string;
+  name: string;
+  email: string;
+  phone: string;
+  relationship: string | null;
+  authorized_to_act: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export function mapRelatedPersonRow(row: RelatedPersonRow): RelatedPerson {
+  return {
+    id: row.id,
+    name: row.name,
+    email: row.email,
+    phone: row.phone,
+    relationship: row.relationship ?? undefined,
+    authorizedToAct: row.authorized_to_act,
+  };
+}
+
+export type PromiseToPayRow = {
+  id: string;
+  account_holder_id: string;
+  amount_cents: number;
+  currency: string;
+  due_date: string;
+  status: string;
+  created_at: string;
+};
+
+const promiseStatusSchema = z.enum(["active", "completed", "cancelled", "missed"]);
+
+export function mapPromiseToPayRow(row: PromiseToPayRow): PromiseToPay {
+  return {
+    id: row.id,
+    amountCents: row.amount_cents,
+    currency: row.currency,
+    dueDate: row.due_date,
+    status: promiseStatusSchema.parse(row.status),
+    createdAt: row.created_at,
+  };
+}
+
+export type TransactionRow = {
+  id: string;
+  account_holder_id: string;
+  type: string;
+  status: string;
+  amount_cents: number;
+  currency: string;
+  description: string;
+  transaction_date: string;
+  created_at: string;
+};
+
+const transactionTypeSchema = z.enum(["payment", "charge", "fee", "adjustment"]);
+const transactionStatusSchema = z.enum(["completed", "pending", "failed", "posted"]);
+
+export function mapTransactionRow(row: TransactionRow): Transaction {
+  return {
+    id: row.id,
+    type: transactionTypeSchema.parse(row.type),
+    status: transactionStatusSchema.parse(row.status),
+    amountCents: row.amount_cents,
+    currency: row.currency,
+    description: row.description,
+    transactionDate: row.transaction_date,
+  };
+}
+
+export type CallAppointmentRow = {
+  id: string;
+  account_holder_id: string;
+  scheduled_at: string;
+  phone: string;
+  reason: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+const callStatusSchema = z.enum(["scheduled", "cancelled", "completed"]);
+
+export function mapCallAppointmentRow(row: CallAppointmentRow): CallAppointment {
+  return {
+    id: row.id,
+    scheduledAt: row.scheduled_at,
+    phone: row.phone,
+    reason: row.reason ?? undefined,
+    status: callStatusSchema.parse(row.status),
+  };
+}
+
+type AccountCollections = Pick<AccountContext, "relatedPeople" | "promisesToPay" | "transactions" | "callAppointments">;
+
+export function mapAccountContext(
+  row: AccountHolderRow,
+  collections: AccountCollections,
+): AccountContext {
+  if (!row.billing_due_date) {
+    throw new Error("Account holder is missing a billing due date.");
+  }
+
+  if (row.last_statement_amount_cents === null) {
+    throw new Error("Account holder is missing a last statement amount.");
+  }
+
+  return {
+    account: mapAccountHolderRow(row),
+    billing: {
+      currentAmountCents: row.balance_cents,
+      lastStatementAmountCents: row.last_statement_amount_cents,
+      dueDate: row.billing_due_date,
+    },
+    ...mapAccountMeta(row.meta),
+    ...collections,
   };
 }
 
