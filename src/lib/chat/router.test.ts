@@ -3,7 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import standardFixture from "../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture, type AccountContext } from "@/lib/account/types";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { futureScheduledCalls, routeReadAction, type ReadAction, type ReadIntent } from "./router";
+import {
+  futureScheduledCalls,
+  isReadIntent,
+  routeReadAction,
+  type ReadAction,
+  type ReadIntent,
+} from "./router";
 
 const baseAccount = normalizeLegacyFixture(standardFixture);
 const account: AccountContext = {
@@ -44,6 +50,24 @@ function readIntent(action: ReadAction): ReadIntent {
 function createRepo(value: AccountContext | null = account) {
   return { getAccountContextByAccountId: vi.fn().mockResolvedValue(value) };
 }
+
+describe("isReadIntent", () => {
+  it.each([
+    "read_account", "read_preferred_contact_method", "read_related_people",
+    "read_promises_to_pay", "read_transactions", "read_call_appointments",
+    "clarify", "unsupported",
+  ] as const)("accepts %s", (action) => {
+    expect(isReadIntent({ action } as ParsedIntent)).toBe(true);
+  });
+
+  it.each([
+    "update_account_holder", "update_preferred_contact_method", "add_related_person",
+    "update_related_person", "remove_related_person", "create_promise_to_pay",
+    "mock_payment", "book_call_appointment",
+  ] as const)("rejects the mutation action %s", (action) => {
+    expect(isReadIntent({ action } as ParsedIntent)).toBe(false);
+  });
+});
 
 describe("futureScheduledCalls", () => {
   it("keeps only future scheduled calls and sorts them soonest first", () => {

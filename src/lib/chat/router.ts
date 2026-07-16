@@ -16,6 +16,21 @@ export type ReadIntent = Extract<
   ParsedIntent,
   { action: ReadAction | "clarify" | "unsupported" }
 >;
+//from routing
+const readIntentActions = new Set<ParsedIntent["action"]>([
+  "read_account",
+  "read_preferred_contact_method",
+  "read_related_people",
+  "read_promises_to_pay",
+  "read_transactions",
+  "read_call_appointments",
+  "clarify",
+  "unsupported",
+]);
+
+export function isReadIntent(intent: ParsedIntent): intent is ReadIntent {
+  return readIntentActions.has(intent.action);
+}
 
 type ReadRepo = Pick<AccountRepo, "getAccountContextByAccountId">;
 //for singular and plural count when outputting deterministically
