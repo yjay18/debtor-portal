@@ -15,10 +15,13 @@ const row: ConversationRow = {
     pendingAction: {
       action: "update_account_holder",
       fields: { phone: "+353831234567" },
-      missingFields: ["email"],
+      missing: ["email"],
     },
     queuedIntents: [{ action: "read_transactions", fields: {} }],
-    awaitingConfirmation: true,
+    awaitingConfirmation: {
+      kind: "next_intent",
+      intent: { action: "read_transactions", fields: {} },
+    },
   },
   created_at: "2026-07-16T12:00:00Z",
   updated_at: "2026-07-16T12:05:00Z",
@@ -36,7 +39,19 @@ it("maps and validates a persisted conversation", () => {
 
 it("uses an empty dialog state when none is stored", () => {
   expect(mapConversationRow({ ...row, pending_action: null }).dialogState)
-    .toEqual({ queuedIntents: [], awaitingConfirmation: false });
+    .toEqual({ queuedIntents: [] });
+});
+
+it("validates a related-person removal confirmation", () => {
+  const awaitingConfirmation = {
+    kind: "remove_related_person",
+    personId: "00000000-0000-4000-8000-000000000003",
+    personName: "John Murphy",
+  };
+  expect(mapConversationRow({
+    ...row,
+    pending_action: { awaitingConfirmation },
+  }).dialogState).toEqual({ queuedIntents: [], awaitingConfirmation });
 });
 
 it.each([
@@ -44,10 +59,20 @@ it.each([
   {
     name: "empty missing-fields list",
     state: {
-      pendingAction: { action: "update_account_holder", fields: {}, missingFields: [] },
+      pendingAction: { action: "update_account_holder", fields: {}, missing: [] },
     },
   },
-  { name: "non-boolean confirmation", state: { awaitingConfirmation: "yes" } },
+  { name: "untyped confirmation", state: { awaitingConfirmation: true } },
+  {
+    name: "invalid removal person ID",
+    state: {
+      awaitingConfirmation: {
+        kind: "remove_related_person",
+        personId: "person-001",
+        personName: "John Murphy",
+      },
+    },
+  },
 ])("rejects dialog state with $name", ({ state }) => {
   expect(() => mapConversationRow({ ...row, pending_action: state }))
     .toThrow();
@@ -169,7 +194,7 @@ it("creates a conversation when no ID is supplied", async () => {
   expect(conversation).toMatchObject({
     id: "conversation-new",
     accountHolderId: "holder-001",
-    dialogState: { queuedIntents: [], awaitingConfirmation: false },
+    dialogState: { queuedIntents: [] },
   });
   expect(insert).toHaveBeenCalledWith({ account_holder_id: "holder-001" });
 });
@@ -364,7 +389,10 @@ function createStateClient(result: FakeResult = {
     account_holder_id: persistedHolderId,
     pending_action: {
       queuedIntents: [{ action: "read_transactions", fields: {} }],
-      awaitingConfirmation: true,
+      awaitingConfirmation: {
+        kind: "next_intent",
+        intent: { action: "read_transactions", fields: {} },
+      },
     },
     updated_at: updatedAt,
   },
@@ -394,7 +422,10 @@ it("updates validated dialog state within its account", async () => {
       { id: persistedConversationId, accountHolderId: persistedHolderId },
       {
         queuedIntents: [{ action: "read_transactions", fields: {} }],
-        awaitingConfirmation: true,
+        awaitingConfirmation: {
+          kind: "next_intent",
+          intent: { action: "read_transactions", fields: {} },
+        },
       },
     );
 
@@ -402,7 +433,10 @@ it("updates validated dialog state within its account", async () => {
   expect(update).toHaveBeenCalledWith({
     pending_action: {
       queuedIntents: [{ action: "read_transactions", fields: {} }],
-      awaitingConfirmation: true,
+      awaitingConfirmation: {
+        kind: "next_intent",
+        intent: { action: "read_transactions", fields: {} },
+      },
     },
     updated_at: updatedAt,
   });

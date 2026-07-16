@@ -7,7 +7,7 @@ import { parsedIntentJsonSchema } from "./parser-schema";
 const input: ParserInput = {
   message: "Change my phone to +353831112233",
   history: [],
-  dialogState: { queuedIntents: [], awaitingConfirmation: false },
+  dialogState: { queuedIntents: [] },
   account: {
     holderName: "Jane Murphy",
     email: "jane.murphy@example.test",

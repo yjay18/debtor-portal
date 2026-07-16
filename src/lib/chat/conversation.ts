@@ -9,19 +9,31 @@ export const chatActionSchema = z.enum([
   "read_promises_to_pay", "mock_payment", "read_transactions",
   "book_call_appointment", "read_call_appointments", "clarify", "unsupported",
 ]);
-
+//enable types in conversation
 const queuedIntentSchema = z.object({
   action: chatActionSchema,
   fields: z.record(z.string(), z.unknown()),
-});
+}).strict();
+
+const awaitingConfirmationSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("next_intent"),
+    intent: queuedIntentSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal("remove_related_person"),
+    personId: z.uuid(),
+    personName: z.string().min(1).max(100),
+  }).strict(),
+]);
 
 export const dialogStateSchema = z.object({
   pendingAction: queuedIntentSchema.extend({
-    missingFields: z.array(z.string().min(1)).min(1),
+    missing: z.array(z.string().min(1)).min(1),
   }).optional(),
   queuedIntents: z.array(queuedIntentSchema).default([]),
-  awaitingConfirmation: z.boolean().default(false),
-});
+  awaitingConfirmation: awaitingConfirmationSchema.optional(),
+}).strict();
 
 export type DialogState = z.infer<typeof dialogStateSchema>;
 export type DialogStateInput = z.input<typeof dialogStateSchema>;

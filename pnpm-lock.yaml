@@ -14,6 +14,9 @@ importers:
       '@supabase/supabase-js':
         specifier: ^2.99.1
         version: 2.99.1
+      chrono-node:
+        specifier: ^2.10.0
+        version: 2.10.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -1317,6 +1320,10 @@ packages:
   chalk@5.6.2:
     resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
     engines: {node: ^12.17.0 || ^14.13 || >=16.0.0}
+
+  chrono-node@2.10.0:
+    resolution: {integrity: sha512-5fJ4zr5W/5DEf+8FMPMXF2qk9L5dc1rAP9Pw009iMlKAghPgx5o7aUcnjEMe6PTwqiqTa5yzmfSm05EHuwr31Q==}
+    engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
 
   class-variance-authority@0.7.1:
     resolution: {integrity: sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg==}
@@ -4667,6 +4674,8 @@ snapshots:
       supports-color: 7.2.0
 
   chalk@5.6.2: {}
+
+  chrono-node@2.10.0: {}
 
   class-variance-authority@0.7.1:
     dependencies:

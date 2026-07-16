@@ -11,7 +11,7 @@ const validRequest = { accountId: "acc_standard_001", message: "Show my account"
 describe("buildParserInput", () => {
   it("builds the minimum parser context from persisted state", () => {
     const account = normalizeLegacyFixture(standardFixture);
-    const dialogState = { queuedIntents: [], awaitingConfirmation: false };
+    const dialogState = { queuedIntents: [] };
     const input = buildParserInput({
       account, conversation: { dialogState }, message: "What is my balance?",
       history: [{ role: "account_holder", content: "Hello" }], nowIso: "2026-07-16T17:00:00+01:00",
@@ -27,7 +27,7 @@ describe("buildParserInput", () => {
 describe("loadReadTurnContext", () => {
   it("loads persisted account and conversation context", async () => {
     const account = normalizeLegacyFixture(standardFixture);
-    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [], awaitingConfirmation: false } };
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [] } };
     const conversations = { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]) };
     const result = await loadReadTurnContext(validRequest, {
       conversations, repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account) },
@@ -86,7 +86,7 @@ describe("persistAssistantResult", () => {
 describe("executeReadChatTurn", () => {
   it("persists, parses, routes, and returns one read turn in order", async () => {
     const account = normalizeLegacyFixture(standardFixture);
-    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [], awaitingConfirmation: false } };
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", dialogState: { queuedIntents: [] } };
     const intent = { action: "read_account", fields: {}, additionalIntents: [], missingFields: [] } as ParsedIntent;
     const addMessage = vi.fn()
       .mockResolvedValueOnce({})
