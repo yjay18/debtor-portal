@@ -75,19 +75,23 @@ it.each([
 });
 
 it.each([
-  { name: "HTTP failure", response: new Response(null, { status: 429 }), message: "LLM provider returned HTTP 429." },
-  { name: "refusal", response: providerResponse(null, "Cannot comply"), message: "LLM provider refused the request." },
-  { name: "empty content", response: providerResponse(null), message: "LLM provider returned no content." },
-  { name: "invalid JSON", response: providerResponse("not-json"), message: "LLM provider returned invalid JSON." },
+  { name: "HTTP failure", response: new Response(null, { status: 429 }), message: "LLM provider returned HTTP 429.", kind: "provider_failure" },
+  { name: "refusal", response: providerResponse(null, "Cannot comply"), message: "LLM provider refused the request.", kind: "provider_failure" },
+  { name: "empty content", response: providerResponse(null), message: "LLM provider returned no content.", kind: "invalid_output" },
+  { name: "invalid content JSON", response: providerResponse("not-json"), message: "LLM provider returned invalid JSON.", kind: "invalid_output" },
+  { name: "invalid response JSON", response: new Response("not-json"), message: "LLM provider returned invalid JSON.", kind: "invalid_output" },
   {
     name: "malformed response",
     response: new Response(JSON.stringify({ choices: [] })),
-    message: "LLM request failed.",
+    message: "LLM provider returned an invalid response.",
+    kind: "invalid_output",
   },
-])("handles $name safely", async ({ response, message }) => {
+])("handles $name safely", async ({ response, message, kind }) => {
   const fetcher = vi.fn().mockResolvedValue(response);
-  await expect(new OpenAiCompatibleClient(config, fetcher).completeJson(messages))
-    .rejects.toThrow(message);
+  const error = await new OpenAiCompatibleClient(config, fetcher)
+    .completeJson(messages).catch((caught) => caught);
+  expect(error).toBeInstanceOf(LlmClientError);
+  expect(error).toMatchObject({ message, kind });
 });
 
 it("times out a slow provider request", async () => {
@@ -107,5 +111,7 @@ it("hides low-level network errors", async () => {
 });
 
 it("uses a dedicated safe error type", () => {
-  expect(new LlmClientError("safe")).toBeInstanceOf(Error);
+  const error = new LlmClientError("safe", "invalid_output");
+  expect(error).toBeInstanceOf(Error);
+  expect(error.kind).toBe("invalid_output");
 });

@@ -27,7 +27,14 @@ export type LlmClientConfig = {
   timeoutMs?: number;
 };
 
-export class LlmClientError extends Error {}
+export class LlmClientError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: "provider_failure" | "invalid_output" = "provider_failure",
+  ) {
+    super(message);
+  }
+}
 //configuring for OpenAI
 export class OpenAiCompatibleClient {
   constructor(
@@ -69,15 +76,24 @@ export class OpenAiCompatibleClient {
         throw new LlmClientError(`LLM provider returned HTTP ${response.status}.`);
       }
 
-      const parsed = providerResponseSchema.parse(await response.json());
+      const rawResponse = await response.json().catch(() => {
+        throw new LlmClientError("LLM provider returned invalid JSON.", "invalid_output");
+      });
+      const parsedResult = providerResponseSchema.safeParse(rawResponse);
+      if (!parsedResult.success) {
+        throw new LlmClientError("LLM provider returned an invalid response.", "invalid_output");
+      }
+      const parsed = parsedResult.data;
       const message = parsed.choices[0].message;
       if (message.refusal) throw new LlmClientError("LLM provider refused the request.");
-      if (!message.content) throw new LlmClientError("LLM provider returned no content.");
+      if (!message.content) {
+        throw new LlmClientError("LLM provider returned no content.", "invalid_output");
+      }
 
       try {
         return JSON.parse(message.content) as unknown;
       } catch {
-        throw new LlmClientError("LLM provider returned invalid JSON.");
+        throw new LlmClientError("LLM provider returned invalid JSON.", "invalid_output");
       }
     } catch (error) {
       if (controller.signal.aborted) throw new LlmClientError("LLM request timed out.");
