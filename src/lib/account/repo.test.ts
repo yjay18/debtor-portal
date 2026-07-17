@@ -379,6 +379,7 @@ it("maps account-holder update fields to database columns", () => {
     city: "Dublin",
     postalCode: "D01 AB12",
     country: "Ireland",
+    preferredContactMethod: "sms",
   })).toEqual({
     first_name: "Jane",
     last_name: "Murphy",
@@ -389,6 +390,7 @@ it("maps account-holder update fields to database columns", () => {
     city: "Dublin",
     postal_code: "D01 AB12",
     country: "Ireland",
+    preferred_contact_method: "sms",
   });
 });
 

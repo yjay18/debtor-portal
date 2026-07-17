@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { sanitizeFreeText, validateAccountHolderUpdate } from "./validation";
+import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate } from "./validation";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 
@@ -105,5 +105,17 @@ describe("validateAccountHolderUpdate", () => {
         additionalIntents: [{ action: "read_transactions", fields: {} }],
       },
     });
+  });
+});
+
+describe("validatePreferredContactMethodUpdate", () => {
+  it.each(["email", "sms", "phone"] as const)("accepts %s", (method) => {
+    expect(validatePreferredContactMethodUpdate({ action: "update_preferred_contact_method", fields: { method }, additionalIntents: [], missingFields: [] }))
+      .toEqual({ status: "ready", method });
+  });
+
+  it("clarifies an omitted method without trusting parser completeness", () => {
+    expect(validatePreferredContactMethodUpdate({ action: "update_preferred_contact_method", fields: {}, additionalIntents: [], missingFields: [] }))
+      .toMatchObject({ status: "clarify", intent: { action: "clarify", missingFields: ["method"] } });
   });
 });

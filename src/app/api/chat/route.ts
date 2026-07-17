@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
-import { isReadIntent, routeAccountHolderUpdate, routeReadAction } from "@/lib/chat/router";
+import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -119,7 +119,20 @@ export async function routeLoadedIntent(input: {
       repo: input.repo,
     });
   }
+  //contact method update code 
+  if (input.intent.action === "update_preferred_contact_method") {
+    return routePreferredContactMethodUpdate({
+      accountId: input.accountId,
+      account: input.account,
+      intent: input.intent,
+      repo: input.repo,
+    });
+  }
   return routeLoadedReadIntent(input);
+}
+
+function isPersistedMutation(action: ChatActionResult["action"]) {
+  return action === "update_account_holder" || action === "update_preferred_contact_method";
 }
 //persists the result of a read turn using an assistant message to store metadata
 // this makes it three actions 
@@ -132,7 +145,7 @@ export async function persistAssistantResult(input: {
   conversations: Pick<ConversationStore, "addMessage">;
   notificationStatus?: NotificationBatchStatus | "queued";
 }): Promise<ChatResponse> {
-  const mutation = input.result.action === "update_account_holder";
+  const mutation = isPersistedMutation(input.result.action);
   const mutationChanged = mutation && (input.result.changeSummary?.length ?? 0) > 0;
   const saved = await input.conversations.addMessage({
     conversationId: input.conversationId,
@@ -183,7 +196,7 @@ export async function executeReadChatTurn(
   });
   //we process after database commit
   let notificationStatus: NotificationBatchStatus | "queued" | undefined;
-  if (result.action === "update_account_holder" && result.success && result.notificationQueued) {
+  if (isPersistedMutation(result.action) && result.success && result.notificationQueued) {
     try {
       const processed = await deps.processNotifications(loaded.conversation.accountHolderId);
       notificationStatus = processed.status === "none" ? "failed" : processed.status;

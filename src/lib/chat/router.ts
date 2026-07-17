@@ -2,7 +2,7 @@ import type { AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, CallAppointment } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
 import { buildAccountHolderUpdateSummary, previewAccountHolderUpdate } from "@/lib/chat/change-summary";
-import { validateAccountHolderUpdate } from "@/lib/chat/validation";
+import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
 export type ReadAction =
@@ -19,6 +19,7 @@ export type ReadIntent = Extract<
   { action: ReadAction | "clarify" | "unsupported" }
 >;
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
+type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
 //from routing
 const readIntentActions = new Set<ParsedIntent["action"]>([
   "read_account",
@@ -64,6 +65,35 @@ export async function routeAccountHolderUpdate(input: {
     account: { ...input.account, account: updated },
     notificationQueued: true,
     changeSummary: buildAccountHolderUpdateSummary(before, updated, validation.fields),
+  };
+}
+
+export async function routePreferredContactMethodUpdate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: PreferredContactMethodUpdateIntent;
+  repo: Pick<AccountRepo, "updateAccountHolder">;
+}): Promise<ChatActionResult> {
+  const validation = validatePreferredContactMethodUpdate(input.intent);
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "Would you prefer email, SMS, or phone?", missingFields: validation.intent.missingFields };
+  }
+
+  const fields = { preferredContactMethod: validation.method };
+  const before = input.account.account;
+  const preview = previewAccountHolderUpdate(before, fields);
+  if (buildAccountHolderUpdateSummary(before, preview, fields).length === 0) {
+    return { action: "update_preferred_contact_method", success: true, reply: "Your preferred contact method is already up to date.", account: input.account, changeSummary: [] };
+  }
+
+  const updated = await input.repo.updateAccountHolder(input.accountId, fields);
+  return {
+    action: "update_preferred_contact_method",
+    success: true,
+    reply: `Preferred contact method updated to ${updated.preferredContactMethod}.`,
+    account: { ...input.account, account: updated },
+    notificationQueued: true,
+    changeSummary: buildAccountHolderUpdateSummary(before, updated, fields),
   };
 }
 

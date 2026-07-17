@@ -7,6 +7,7 @@ import {
   futureScheduledCalls,
   isReadIntent,
   routeAccountHolderUpdate,
+  routePreferredContactMethodUpdate,
   routeReadAction,
   type ReadAction,
   type ReadIntent,
@@ -98,6 +99,28 @@ describe("routeAccountHolderUpdate", () => {
     const result = await routeAccountHolderUpdate({ accountId: "unused", account, intent, repo: { updateAccountHolder } });
 
     expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["phone"] });
+    expect(updateAccountHolder).not.toHaveBeenCalled();
+  });
+});
+
+describe("routePreferredContactMethodUpdate", () => {
+  it("writes a changed method and returns notification evidence", async () => {
+    const updated = { ...account.account, preferredContactMethod: "sms" as const };
+    const updateAccountHolder = vi.fn().mockResolvedValue(updated);
+    const intent: Extract<ParsedIntent, { action: "update_preferred_contact_method" }> = { action: "update_preferred_contact_method", fields: { method: "sms" }, additionalIntents: [], missingFields: [] };
+    const result = await routePreferredContactMethodUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder } });
+
+    expect(updateAccountHolder).toHaveBeenCalledWith("acc_standard_001", { preferredContactMethod: "sms" });
+    expect(result).toMatchObject({ action: "update_preferred_contact_method", success: true, notificationQueued: true,
+      changeSummary: [{ fields: [{ field: "Preferred contact method", before: account.account.preferredContactMethod, after: "sms" }] }] });
+  });
+
+  it("skips a no-op method without queuing a notification", async () => {
+    const updateAccountHolder = vi.fn();
+    const intent = { action: "update_preferred_contact_method", fields: { method: account.account.preferredContactMethod }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
+    const result = await routePreferredContactMethodUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder } });
+
+    expect(result).toMatchObject({ success: true, changeSummary: [] });
     expect(updateAccountHolder).not.toHaveBeenCalled();
   });
 });

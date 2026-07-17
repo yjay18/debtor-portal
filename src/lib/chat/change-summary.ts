@@ -24,8 +24,9 @@ export function previewAccountHolderUpdate(holder: AccountHolder, fields: Accoun
       line2: fields.addressLine2 ?? holder.address.line2,
       city: fields.city ?? holder.address.city,
       postalCode: fields.postalCode ?? holder.address.postalCode,
-      country: fields.country ?? holder.address.country,
-    },
+    country: fields.country ?? holder.address.country,
+  },
+    preferredContactMethod: fields.preferredContactMethod ?? holder.preferredContactMethod,
   };
 }
 
@@ -39,6 +40,7 @@ export function buildAccountHolderUpdateSummary(before: AccountHolder, after: Ac
     ["city", "City", before.address.city, after.address.city],
     ["postalCode", "Postal code", before.address.postalCode, after.address.postalCode],
     ["country", "Country", before.address.country, after.address.country],
+    ["preferredContactMethod", "Preferred contact method", before.preferredContactMethod, after.preferredContactMethod],
   ] as const;
   return buildUpdateSummary({ entity: "account_holder", label: "Account details",
     fields: candidates.filter(([key]) => touched[key] !== undefined)

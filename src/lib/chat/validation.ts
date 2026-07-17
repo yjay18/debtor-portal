@@ -4,6 +4,7 @@ import type { AccountHolderUpdate } from "@/lib/account/repo";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
+type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
 //normalizing
 export function sanitizeFreeText(value: string): string {
   return value.normalize("NFC").replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim();
@@ -42,6 +43,10 @@ export type AccountUpdateValidation =
       status: "clarify";
       intent: ParsedIntent;
     };
+
+export type PreferredContactMethodValidation =
+  | { status: "ready"; method: "email" | "sms" | "phone" }
+  | { status: "clarify"; intent: ParsedIntent };
 
 const fieldLabels: Record<string, string> = {
   firstName: "first name",
@@ -83,6 +88,24 @@ export function validateAccountHolderUpdate(
       additionalIntents: intent.additionalIntents,
       missingFields,
       clarificationQuestion: question,
+    },
+  };
+}
+
+export function validatePreferredContactMethodUpdate(
+  intent: PreferredContactMethodUpdateIntent,
+): PreferredContactMethodValidation {
+  const result = z.enum(["email", "sms", "phone"]).safeParse(intent.fields.method);
+  if (result.success) return { status: "ready", method: result.data };
+
+  return {
+    status: "clarify",
+    intent: {
+      action: "clarify",
+      fields: {},
+      additionalIntents: intent.additionalIntents,
+      missingFields: ["method"],
+      clarificationQuestion: "Would you prefer email, SMS, or phone?",
     },
   };
 }

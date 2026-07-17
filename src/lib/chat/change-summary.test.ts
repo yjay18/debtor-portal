@@ -19,3 +19,12 @@ it("returns no summary when a touched value is unchanged", () => {
   const touched = { phone: holder.phone };
   expect(buildAccountHolderUpdateSummary(holder, previewAccountHolderUpdate(holder, touched), touched)).toEqual([]);
 });
+
+it("builds a preferred-contact before-and-after update", () => {
+  const touched = { preferredContactMethod: "sms" as const };
+  const after = previewAccountHolderUpdate(holder, touched);
+  expect(buildAccountHolderUpdateSummary(holder, after, touched)).toEqual([{
+    kind: "updated", entity: "account_holder", label: "Account details",
+    fields: [{ field: "Preferred contact method", before: holder.preferredContactMethod, after: "sms" }],
+  }]);
+});

@@ -76,6 +76,16 @@ describe("routeLoadedIntent", () => {
     expect(result).toMatchObject({ action: "update_account_holder", success: true });
   });
 
+  it("routes preferred-contact updates to the shared persisted write", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const updateAccountHolder = vi.fn().mockResolvedValue({ ...account.account, preferredContactMethod: "sms" });
+    const intent = { action: "update_preferred_contact_method", fields: { method: "sms" } } as ParsedIntent;
+    const result = await routeLoadedIntent({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder }, nowIso: "unused" });
+
+    expect(updateAccountHolder).toHaveBeenCalledWith("acc_standard_001", { preferredContactMethod: "sms" });
+    expect(result).toMatchObject({ action: "update_preferred_contact_method", success: true, notificationQueued: true });
+  });
+
   it("keeps every other mutation blocked", async () => {
     const account = normalizeLegacyFixture(standardFixture);
     const updateAccountHolder = vi.fn();
@@ -142,6 +152,22 @@ describe("executeReadChatTurn", () => {
     expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_account_holder", metadata: { validationOutcome: "mutation_succeeded", notificationStatus: "logged", touchedIds: ["acc_standard_001"] } }));
     expect(response.result).toMatchObject({ action: "update_account_holder", notificationQueued: true });
     expect(response.result.reply).toContain("notification attempt was logged");
+  });
+
+  it("processes and audits a preferred-contact mutation", async () => {
+    const account = normalizeLegacyFixture(standardFixture);
+    const conversation = { id: "11111111-1111-4111-8111-111111111111", accountHolderId: "22222222-2222-4222-8222-222222222222", dialogState: { queuedIntents: [] } };
+    const addMessage = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "assistant-id", content: "Updated", createdAt: "2026-07-16T17:00:01+01:00" });
+    const response = await executeReadChatTurn(validRequest, {
+      conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]), addMessage },
+      repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn().mockResolvedValue({ ...account.account, preferredContactMethod: "sms" }) },
+      now: () => "2026-07-16T17:00:00+01:00",
+      parse: vi.fn().mockResolvedValue({ action: "update_preferred_contact_method", fields: { method: "sms" } } as ParsedIntent),
+      processNotifications: vi.fn().mockResolvedValue({ status: "logged", attemptCount: 1 }),
+    });
+
+    expect(response.result).toMatchObject({ action: "update_preferred_contact_method", notificationQueued: true });
+    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_preferred_contact_method", metadata: expect.objectContaining({ validationOutcome: "mutation_succeeded", notificationStatus: "logged" }) }));
   });
 
   it("keeps a committed update successful when notification processing fails", async () => {

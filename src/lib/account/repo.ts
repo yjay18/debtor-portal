@@ -226,6 +226,7 @@ export type AccountHolderUpdate = {
   city?: string;
   postalCode?: string;
   country?: string;
+  preferredContactMethod?: AccountHolder["preferredContactMethod"];
 };
 // to convert from Typescript camelcase to posgres snake case
 //and we remove undefined entries to avoid overwriting and prevent field data leakage
@@ -240,6 +241,7 @@ export function mapAccountHolderUpdate(fields: AccountHolderUpdate): Record<stri
     ["city", fields.city],
     ["postal_code", fields.postalCode],
     ["country", fields.country],
+    ["preferred_contact_method", fields.preferredContactMethod],
   ].filter((entry): entry is [string, string] => entry[1] !== undefined));
 }
 
