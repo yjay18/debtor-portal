@@ -4,6 +4,7 @@ const DUBLIN_TIME_ZONE = "Europe/Dublin";
 const isoDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 const isoDateTimePattern =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
+const ordinalOfNextMonthPattern = /\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\s+of\s+next\s+month\b/i;
 
 type DateParts = {
   year: number;
@@ -140,6 +141,22 @@ function chronoKey(result: chrono.ParsedResult, kind: FutureDateKind): string | 
   return kind === "date" ? dateKey(parts as DateParts) : dateTimeKey(parts as DateParts);
 }
 
+function ordinalOfNextMonthKey(rawText: string, now: Date): string | null {
+  const match = ordinalOfNextMonthPattern.exec(rawText);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const dublinNow = dublinParts(now);
+  const nextMonth = new Date(Date.UTC(dublinNow.year, dublinNow.month, 1));
+  const key = dateKey({
+    year: nextMonth.getUTCFullYear(),
+    month: nextMonth.getUTCMonth() + 1,
+    day,
+  });
+
+  return isValidIsoDate(key) ? key : null;
+}
+
 export function resolveFutureDate(input: {
   rawText: string;
   llmIso: string;
@@ -178,7 +195,10 @@ export function resolveFutureDate(input: {
 
   const modelKey =
     input.kind === "date" ? input.llmIso : dateTimeKey(dublinParts(llmDateTime as Date));
-  if (chronoKey(chronoResults[0], input.kind) !== modelKey) {
+  const deterministicKey = input.kind === "date"
+    ? ordinalOfNextMonthKey(input.rawText, now) ?? chronoKey(chronoResults[0], input.kind)
+    : chronoKey(chronoResults[0], input.kind);
+  if (deterministicKey !== modelKey) {
     return {
       status: "clarify",
       reason: "date_disagreement",

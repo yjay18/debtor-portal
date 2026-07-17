@@ -98,6 +98,15 @@ describe("parsedIntentSchema", () => {
     expect(properties.action.enum).not.toContain("delete_account");
   });
 
+  it("requires an offset-aware timestamp from the provider for call appointments", () => {
+    const fields = (parsedIntentJsonSchema.properties as Record<string, JsonSchema>).fields;
+    const callFields = (fields.anyOf as JsonSchema[]).find((schema) => "dateTime" in (schema.properties as object));
+
+    const dateTime = (callFields?.properties as Record<string, JsonSchema>).dateTime;
+    expect(dateTime.type).toEqual(["string", "null"]);
+    expect(dateTime.pattern).toContain("(?:Z|[+-]\\d{2}:\\d{2})$");
+  });
+
   it("makes every provider object strict with all properties required", () => {
     function inspect(schema: unknown): void {
       if (!schema || typeof schema !== "object") return;

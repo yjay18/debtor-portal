@@ -29,6 +29,7 @@ describe("normalizeMoney", () => {
     ["500 euro", "EUR", 50_000],
     ["500 EUR", "EUR", 50_000],
     ["500 quid", "EUR", 50_000],
+    ["500 euro today", "EUR", 50_000],
     ["$200", "USD", 20_000],
   ])("accepts %s for a %s account", (amountRaw, currency, amountCents) => {
     expect(normalizeMoney(amountRaw, currency)).toEqual({
@@ -38,7 +39,7 @@ describe("normalizeMoney", () => {
     });
   });
 
-  it.each(["$200", "200 dollars", "£200"])(
+  it.each(["$200", "200 dollars", "200 dollars now", "£200"])(
     "asks for the ledger currency instead of converting %s",
     (amountRaw) => {
       expect(normalizeMoney(amountRaw, "EUR")).toMatchObject({

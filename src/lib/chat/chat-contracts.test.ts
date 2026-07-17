@@ -60,7 +60,7 @@ describe("chat action acceptance contracts", () => {
   it("records a one-time promise to pay with amount and future due date", async () => {
     const promise = { id: "promise-002", amountCents: 50000, currency: "EUR", dueDate: "2026-08-01",
       status: "active" as const, createdAt: nowIso };
-    const result = await routePromiseToPayCreate({ accountId, account, nowIso, rawMessage: "Pay 500 euro on August 1st",
+    const result = await routePromiseToPayCreate({ accountId, account, nowIso, rawMessage: "Can I pay 500 euro on the 1st of next month?",
       intent: { action: "create_promise_to_pay", fields: { amountRaw: "500 euro", dueDate: "2026-08-01" } } as Extract<ParsedIntent, { action: "create_promise_to_pay" }>,
       repo: { addPromiseToPay: vi.fn().mockResolvedValue(promise) } });
 

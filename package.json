@@ -9,7 +9,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "eval": "tsx eval/run.ts"
+    "eval": "node --import tsx eval/run.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.2.0",

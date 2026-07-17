@@ -1,5 +1,6 @@
 const amountTokenPattern = /[+-]?\d[\d,]*(?:\.\d+)?/g;
 const validAmountPattern = /^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{1,2})?$/;
+const trailingTimingWordsPattern = /(?:\s+(?:now|today))+\s*[.!?]?$/iu;
 
 const currencyAliases: Record<string, string> = {
   "€": "EUR",
@@ -40,12 +41,13 @@ export function normalizeMoney(
   amountRaw: string,
   accountCurrency: string,
 ): MoneyNormalizationResult {
+  const normalizedAmountRaw = amountRaw.trim().replace(trailingTimingWordsPattern, "");
   const currency = accountCurrency.trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) {
     throw new Error("Account currency must be a three-letter code.");
   }
 
-  const amountCents = parseMajorAmountToCents(amountRaw);
+  const amountCents = parseMajorAmountToCents(normalizedAmountRaw);
   if (amountCents === null) {
     return {
       status: "clarify",
@@ -54,7 +56,7 @@ export function normalizeMoney(
     };
   }
 
-  const mention = amountRaw
+  const mention = normalizedAmountRaw
     .replace(amountTokenPattern, "")
     .trim()
     .toLocaleLowerCase("en");

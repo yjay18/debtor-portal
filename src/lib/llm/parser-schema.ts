@@ -86,6 +86,10 @@ type JsonSchema = Record<string, unknown>;
 
 const nullableText = { type: ["string", "null"] };
 const nullableBoolean = { type: ["boolean", "null"] };
+const nullableOffsetDateTime = {
+  type: ["string", "null"],
+  pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d{1,3})?)?(?:Z|[+-]\\d{2}:\\d{2})$",
+};
 //using the strict object function to enforce constrained fields from the openai endpoint
 // altho this exists, we use a local zod schema to validate the fields and actions
 // coz openai endpoint can return any fields and actions (e.g action : "add_balance" and field: "phone number": +"1234567890") which definitely needs validation 
@@ -124,7 +128,7 @@ const providerFields = {
   mock_payment: strictObject({ amountRaw: nullableText }),
   read_transactions: strictObject({}),
   book_call_appointment: strictObject({
-    dateTime: nullableText, phone: nullableText, reason: nullableText,
+    dateTime: nullableOffsetDateTime, phone: nullableText, reason: nullableText,
   }),
   read_call_appointments: strictObject({}),
   clarify: strictObject({}),

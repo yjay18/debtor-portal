@@ -8,6 +8,7 @@ describe("resolveFutureDate", () => {
   it.each([
     ["tomorrow", "2026-07-17"],
     ["August 1st", "2026-08-01"],
+    ["the 1st of next month", "2026-08-01"],
   ])("accepts agreeing future date %s", (rawText, llmIso) => {
     expect(resolveFutureDate({ rawText, llmIso, nowIso, kind: "date" })).toEqual({
       status: "ready",
@@ -40,7 +41,6 @@ describe("resolveFutureDate", () => {
   it.each([
     ["tomorrow", "2026-07-18", "date"],
     ["next Tuesday at 10am", "2026-07-21T11:00:00+01:00", "dateTime"],
-    ["1st of next month", "2026-08-01", "date"],
   ] as const)("clarifies when Chrono and the model disagree for %s", (rawText, llmIso, kind) => {
     expect(resolveFutureDate({ rawText, llmIso, nowIso, kind })).toMatchObject({
       status: "clarify",
