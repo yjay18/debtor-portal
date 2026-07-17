@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "./validation";
+import { sanitizeFreeText, validateAccountHolderUpdate, validateCallAppointmentCreate, validateMockPayment, validatePreferredContactMethodUpdate, validatePromiseToPayCreate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "./validation";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 
@@ -155,5 +155,68 @@ describe("validateRelatedPersonRemove", () => {
   it("clarifies when the selector is absent", () => {
     expect(validateRelatedPersonRemove({ action: "remove_related_person", fields: {}, additionalIntents: [], missingFields: [] }))
       .toMatchObject({ status: "clarify", intent: { missingFields: ["selector"] } });
+  });
+});
+
+describe("validatePromiseToPayCreate", () => {
+  it("converts a matching-currency amount to cents and accepts an agreeing future date", () => {
+    expect(validatePromiseToPayCreate({
+      intent: { action: "create_promise_to_pay", fields: { amountRaw: "€250.50", dueDate: "2026-08-01" }, additionalIntents: [], missingFields: [] },
+      accountCurrency: "EUR", nowIso: "2026-07-17T09:00:00.000Z", rawMessage: "I promise to pay €250.50 on August 1st",
+    })).toEqual({ status: "ready", fields: { amountCents: 25050, currency: "EUR", dueDate: "2026-08-01" } });
+  });
+
+  it.each([
+    ["foreign currency", "$250", "2026-08-01", "I promise to pay $250 on August 1st", "amountRaw"],
+    ["past date", "€250", "2026-07-16", "I promise to pay €250 yesterday", "dueDate"],
+  ])("clarifies %s without becoming write-ready", (_label, amountRaw, dueDate, rawMessage, missingField) => {
+    expect(validatePromiseToPayCreate({
+      intent: { action: "create_promise_to_pay", fields: { amountRaw, dueDate }, additionalIntents: [], missingFields: [] },
+      accountCurrency: "EUR", nowIso: "2026-07-17T09:00:00.000Z", rawMessage,
+    })).toMatchObject({ status: "clarify", intent: { missingFields: [missingField] } });
+  });
+});
+
+describe("validateMockPayment", () => {
+  it("normalizes a matching-currency payment into integer cents", () => {
+    expect(validateMockPayment({ intent: { action: "mock_payment", fields: { amountRaw: "€150.50" }, additionalIntents: [], missingFields: [] }, accountCurrency: "EUR", balanceCents: 128500 }))
+      .toEqual({ status: "ready", amountCents: 15050, currency: "EUR", exceedsBalance: false });
+  });
+
+  it.each([
+    ["missing amount", undefined, 128500],
+    ["foreign currency", "$150", 128500],
+  ])("clarifies %s", (_label, amountRaw, balanceCents) => {
+    expect(validateMockPayment({ intent: { action: "mock_payment", fields: { amountRaw }, additionalIntents: [], missingFields: [] }, accountCurrency: "EUR", balanceCents }))
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["amountRaw"] } });
+  });
+
+  it("flags an overpayment while keeping it eligible for an idempotent replay", () => {
+    expect(validateMockPayment({ intent: { action: "mock_payment", fields: { amountRaw: "€1,286" }, additionalIntents: [], missingFields: [] }, accountCurrency: "EUR", balanceCents: 128500 }))
+      .toEqual({ status: "ready", amountCents: 128600, currency: "EUR", exceedsBalance: true });
+  });
+});
+
+describe("validateCallAppointmentCreate", () => {
+  const intent = { action: "book_call_appointment", fields: { dateTime: "2026-07-21T10:00:00+01:00" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "book_call_appointment" }>;
+
+  it("normalizes an agreeing future time and defaults to the account phone", () => {
+    expect(validateCallAppointmentCreate({ intent, accountPhone: "+353831234567", nowIso: "2026-07-16T15:00:00Z", rawMessage: "Book a call next Tuesday at 10am" }))
+      .toEqual({ status: "ready", fields: { scheduledAt: "2026-07-21T09:00:00.000Z", phone: "+353831234567" } });
+  });
+
+  it("sanitizes a supplied phone and reason", () => {
+    expect(validateCallAppointmentCreate({ intent: { ...intent, fields: { ...intent.fields, phone: " +353831112233 ", reason: " Discuss my account\n " } },
+      accountPhone: "+353831234567", nowIso: "2026-07-16T15:00:00Z", rawMessage: "Book a call next Tuesday at 10am" }))
+      .toMatchObject({ status: "ready", fields: { phone: "+353831112233", reason: "Discuss my account" } });
+  });
+
+  it.each([
+    ["missing time", { ...intent, fields: {} }, "Book a call", "dateTime"],
+    ["past time", { ...intent, fields: { dateTime: "2026-07-15T10:00:00+01:00" } }, "Book a call yesterday at 10am", "dateTime"],
+    ["invalid phone", { ...intent, fields: { ...intent.fields, phone: "083 111 2233" } }, "Book a call next Tuesday at 10am", "phone"],
+  ])("clarifies %s before writing", (_label, invalidIntent, rawMessage, missingField) => {
+    expect(validateCallAppointmentCreate({ intent: invalidIntent as typeof intent, accountPhone: "+353831234567",
+      nowIso: "2026-07-16T15:00:00Z", rawMessage })).toMatchObject({ status: "clarify", intent: { missingFields: [missingField] } });
   });
 });

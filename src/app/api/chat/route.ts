@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, RelatedPerson } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
-import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction, routeRelatedPersonCreate, routeRelatedPersonRemovalConfirmed, routeRelatedPersonRemovalRequest, routeRelatedPersonUpdate } from "@/lib/chat/router";
+import { isReadIntent, routeAccountHolderUpdate, routeCallAppointmentCreate, routeMockPayment, routePreferredContactMethodUpdate, routePromiseToPayCreate, routeReadAction, routeRelatedPersonCreate, routeRelatedPersonRemovalConfirmed, routeRelatedPersonRemovalRequest, routeRelatedPersonUpdate } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -15,9 +15,12 @@ const chatRequestSchema = z.object({
   accountId: z.string().trim().min(1),
   message: z.string().trim().min(1),
   conversationId: z.uuid().optional(),
+  idempotencyKey: z.uuid(),
 }).strict();
 
-export function parseChatRequest(input: unknown): ChatRequest {
+type ValidatedChatRequest = ChatRequest & { idempotencyKey: string };
+
+export function parseChatRequest(input: unknown): ValidatedChatRequest {
   return chatRequestSchema.parse(input);
 }
 // builds the input for the parser
@@ -52,13 +55,13 @@ type ReadTurnLoaders = {
 
 type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations" | "repo"> & {
   conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage" | "updateDialogState">;
-  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson" | "deleteRelatedPerson">;
+  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson" | "deleteRelatedPerson" | "addPromiseToPay" | "recordPayment" | "addCallAppointment">;
   parse: (input: ParserInput) => Promise<ParsedIntent>;
   processNotifications: (accountHolderId: string) => ReturnType<typeof processQueuedNotifications>;
 };
 
 type ReadTurnExecutor = (
-  request: ChatRequest,
+  request: ValidatedChatRequest,
   deps: ReadTurnDependencies,
 ) => Promise<ChatResponse>;
 
@@ -109,7 +112,9 @@ export async function routeLoadedIntent(input: {
   account: AccountContext;
   intent: ParsedIntent;
   nowIso: string;
-  repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson">;
+  rawMessage: string;
+  idempotencyKey: string;
+  repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson" | "addPromiseToPay" | "recordPayment" | "addCallAppointment">;
 }): Promise<ChatActionResult> {
   if (input.intent.action === "update_account_holder") {
     return routeAccountHolderUpdate({
@@ -150,6 +155,24 @@ export async function routeLoadedIntent(input: {
       intent: input.intent,
     });
   }
+  if (input.intent.action === "create_promise_to_pay") {
+    return routePromiseToPayCreate({
+      accountId: input.accountId,
+      account: input.account,
+      intent: input.intent,
+      rawMessage: input.rawMessage,
+      nowIso: input.nowIso,
+      repo: input.repo,
+    });
+  }
+  if (input.intent.action === "mock_payment") {
+    return routeMockPayment({ accountId: input.accountId, account: input.account, intent: input.intent,
+      idempotencyKey: input.idempotencyKey, repo: input.repo });
+  }
+  if (input.intent.action === "book_call_appointment") {
+    return routeCallAppointmentCreate({ accountId: input.accountId, account: input.account, intent: input.intent,
+      rawMessage: input.rawMessage, nowIso: input.nowIso, repo: input.repo });
+  }
   return routeLoadedReadIntent(input);
 }
 //only one related person can be removed at a time and we ask for confirmation
@@ -158,7 +181,10 @@ function isPersistedMutation(action: ChatActionResult["action"]) {
     || action === "update_preferred_contact_method"
     || action === "add_related_person"
     || action === "update_related_person"
-    || action === "remove_related_person";
+    || action === "remove_related_person"
+    || action === "create_promise_to_pay"
+    || action === "mock_payment"
+    || action === "book_call_appointment";
 }
 
 function confirmationAnswer(message: string) {
@@ -203,7 +229,10 @@ export async function persistAssistantResult(input: {
         ? mutation ? mutationChanged ? "mutation_succeeded" : "mutation_noop" : "read_succeeded"
         : "not_completed",
       touchedIds: mutationChanged && input.result.account
-        ? [input.result.account.account.accountId, ...(input.result.relatedPeople?.map((person) => person.id) ?? [])]
+        ? [input.result.account.account.accountId, ...(input.result.relatedPeople?.map((person) => person.id) ?? []),
+            ...(input.result.promisesToPay?.map((promise) => promise.id) ?? []),
+            ...(input.result.transaction ? [input.result.transaction.id] : []),
+            ...(input.result.callAppointments?.map((call) => call.id) ?? [])]
         : [],
       ...(input.result.notificationQueued
         ? { notificationStatus: input.notificationStatus ?? "queued" }
@@ -225,7 +254,7 @@ export async function persistAssistantResult(input: {
 //coordinates persistent context, message,parser and routing for the read turn
 //parser is kept as a dependency to allow for mocking and other provider specific implementations
 export async function executeReadChatTurn(
-  request: ChatRequest,
+  request: ValidatedChatRequest,
   deps: ReadTurnDependencies,
 ): Promise<ChatResponse> {
   const loaded = await loadReadTurnContext(request, deps);
@@ -260,6 +289,8 @@ export async function executeReadChatTurn(
       account: loaded.account,
       intent,
       nowIso: loaded.nowIso,
+      rawMessage: request.message,
+      idempotencyKey: request.idempotencyKey,
       repo: deps.repo,
     });
     const person = removalConfirmationPerson(result);
@@ -300,7 +331,7 @@ export async function executeReadChatTurn(
 }
 //https wrapper for the read turn executor (and to handle errors)
 export async function respondToReadChatTurn(
-  request: ChatRequest,
+  request: ValidatedChatRequest,
   deps: ReadTurnDependencies,
   execute: ReadTurnExecutor = executeReadChatTurn,
 ) {
@@ -316,12 +347,12 @@ export async function respondToReadChatTurn(
 
 export async function POST(request: Request) {
   // to catch malformed or invalid fields
-  let body: ChatRequest;
+  let body: ValidatedChatRequest;
   try {
     body = parseChatRequest(await request.json());
   } catch {
     return NextResponse.json(
-      { error: "A valid accountId and message are required." },
+      { error: "A valid accountId, message, and idempotencyKey are required." },
       { status: 400 },
     );
   }

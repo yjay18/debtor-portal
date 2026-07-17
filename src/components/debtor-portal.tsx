@@ -132,6 +132,8 @@ export function DebtorPortal({ accountContext }: PortalProps) {
         body: JSON.stringify({
           accountId: currentAccountContext.account.accountId,
           message: nextMessage,
+          //for security and idempotency
+          idempotencyKey: crypto.randomUUID(),
           ...(conversationId ? { conversationId } : {}),
         }),
       });

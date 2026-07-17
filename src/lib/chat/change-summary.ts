@@ -1,4 +1,4 @@
-import type { AccountHolder } from "@/lib/account/types";
+import type { AccountHolder, CallAppointment, PromiseToPay, Transaction } from "@/lib/account/types";
 import type { RelatedPerson } from "@/lib/account/types";
 import type { AccountHolderUpdate, RelatedPersonUpdate } from "@/lib/account/repo";
 import type { ChangeSummary } from "./types";
@@ -66,6 +66,40 @@ export function buildRelatedPersonRemoveSummary(person: RelatedPerson): ChangeSu
       { field: "Authorized to act", before: person.authorizedToAct ? "Yes" : "No" },
     ],
   }];
+}
+
+export function buildPromiseToPayCreateSummary(promise: PromiseToPay): ChangeSummary[] {
+  const amount = new Intl.NumberFormat("en-IE", { style: "currency", currency: promise.currency }).format(promise.amountCents / 100);
+  return buildCreateSummary({ entity: "promise_to_pay", label: "Promise to pay", fields: [
+    { field: "Amount", after: amount },
+    { field: "Due date", after: promise.dueDate },
+    { field: "Status", after: "Active" },
+  ] });
+}
+
+export function buildPaymentSummary(input: {
+  beforeBalanceCents: number;
+  afterBalanceCents: number;
+  transaction: Transaction;
+}): ChangeSummary[] {
+  const format = (amountCents: number) => new Intl.NumberFormat("en-IE", { style: "currency", currency: input.transaction.currency }).format(amountCents / 100);
+  return [
+    { kind: "updated", entity: "account_holder", label: "Balance", fields: [
+      { field: "Balance", before: format(input.beforeBalanceCents), after: format(input.afterBalanceCents) },
+    ] },
+    { kind: "created", entity: "transaction", label: "Payment", fields: [
+      { field: "Amount", after: format(input.transaction.amountCents) }, { field: "Status", after: "Completed" },
+    ] },
+  ];
+}
+
+export function buildCallAppointmentCreateSummary(call: CallAppointment): ChangeSummary[] {
+  return buildCreateSummary({ entity: "call_appointment", label: "Call appointment", fields: [
+    { field: "Scheduled for", after: call.scheduledAt },
+    { field: "Phone", after: call.phone },
+    ...(call.reason ? [{ field: "Reason", after: call.reason }] : []),
+    { field: "Status", after: "Scheduled" },
+  ] });
 }
 
 export function previewAccountHolderUpdate(holder: AccountHolder, fields: AccountHolderUpdate): AccountHolder {

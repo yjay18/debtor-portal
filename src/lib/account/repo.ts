@@ -173,8 +173,27 @@ export type TransactionRow = {
   currency: string;
   description: string;
   transaction_date: string;
+  idempotency_key: string | null;
   created_at: string;
 };
+
+const recordPaymentRowSchema = z.object({
+  transaction_id: z.uuid(),
+  new_balance_cents: z.number().int().nonnegative(),
+  replayed: z.boolean(),
+}).strict();
+
+export type RecordPaymentResult = {
+  transaction: Transaction;
+  newBalanceCents: number;
+  replayed: boolean;
+};
+
+export class PaymentRepoError extends Error {
+  constructor(readonly code: "insufficient_balance") {
+    super(code);
+  }
+}
 
 const transactionTypeSchema = z.enum(["payment", "charge", "fee", "adjustment"]);
 const transactionStatusSchema = z.enum(["completed", "pending", "failed", "posted"]);
@@ -238,6 +257,18 @@ export type RelatedPersonCreate = {
 };
 
 export type RelatedPersonUpdate = Partial<RelatedPersonCreate>;
+
+export type PromiseToPayCreate = {
+  amountCents: number;
+  currency: string;
+  dueDate: string;
+};
+
+export type CallAppointmentCreate = {
+  scheduledAt: string;
+  phone: string;
+  reason?: string;
+};
 
 export function mapRelatedPersonCreate(fields: RelatedPersonCreate) {
   return {
@@ -323,6 +354,19 @@ export interface AccountRepo {
     accountId: string,
     personId: string,
   ): Promise<RelatedPerson>;
+  addPromiseToPay(
+    accountId: string,
+    fields: PromiseToPayCreate,
+  ): Promise<PromiseToPay>;
+  recordPayment(
+    accountId: string,
+    amountCents: number,
+    idempotencyKey: string,
+  ): Promise<RecordPaymentResult>;
+  addCallAppointment(
+    accountId: string,
+    fields: CallAppointmentCreate,
+  ): Promise<CallAppointment>;
 }
 //wrapper class to create supa client and fetch acc context
 export class SupabaseAccountRepo implements AccountRepo {
@@ -480,5 +524,92 @@ export class SupabaseAccountRepo implements AccountRepo {
     if (!data) throw new Error("Related person not found.");
 
     return mapRelatedPersonRow(data as RelatedPersonRow);
+  }
+
+  async addPromiseToPay(
+    accountId: string,
+    fields: PromiseToPayCreate,
+  ): Promise<PromiseToPay> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("id")
+      .eq("account_id", accountId)
+      .maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client
+      .from("promises_to_pay")
+      .insert({ account_holder_id: holder.id, amount_cents: fields.amountCents, currency: fields.currency, due_date: fields.dueDate, status: "active" })
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(`Failed to create promise to pay: ${error.message}`);
+    if (!data) throw new Error("Promise to pay was not created.");
+
+    return mapPromiseToPayRow(data as PromiseToPayRow);
+  }
+
+  async recordPayment(
+    accountId: string,
+    amountCents: number,
+    idempotencyKey: string,
+  ): Promise<RecordPaymentResult> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("id")
+      .eq("account_id", accountId)
+      .maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client.rpc("record_payment", {
+      p_account_holder_id: holder.id,
+      p_amount_cents: amountCents,
+      p_idempotency_key: idempotencyKey,
+    });
+    if (error?.code === "23505") return this.loadConcurrentPaymentReplay(holder.id, idempotencyKey);
+    if (error?.message.includes("INSUFFICIENT_BALANCE")) throw new PaymentRepoError("insufficient_balance");
+    if (error) throw new Error(`Failed to record payment: ${error.message}`);
+
+    const payment = z.array(recordPaymentRowSchema).length(1).parse(data)[0];
+    const transaction = await this.loadPaymentTransaction(holder.id, "id", payment.transaction_id);
+    return { transaction, newBalanceCents: payment.new_balance_cents, replayed: payment.replayed };
+  }
+
+  private async loadPaymentTransaction(holderId: string, column: "id" | "idempotency_key", value: string) {
+    const { data, error } = await this.client.from("transactions").select("*")
+      .eq(column, value).eq("account_holder_id", holderId).maybeSingle();
+    if (error) throw new Error(`Failed to load payment transaction: ${error.message}`);
+    if (!data) throw new Error("Payment transaction not found.");
+    return mapTransactionRow(data as TransactionRow);
+  }
+
+  private async loadConcurrentPaymentReplay(holderId: string, idempotencyKey: string): Promise<RecordPaymentResult> {
+    const [transaction, balanceResult] = await Promise.all([
+      this.loadPaymentTransaction(holderId, "idempotency_key", idempotencyKey),
+      this.client.from("account_holders").select("balance_cents").eq("id", holderId).maybeSingle(),
+    ]);
+    if (balanceResult.error) throw new Error(`Failed to load account balance: ${balanceResult.error.message}`);
+    if (!balanceResult.data) throw new Error("Account not found.");
+    const newBalanceCents = z.number().int().nonnegative().parse(balanceResult.data.balance_cents);
+    return { transaction, newBalanceCents, replayed: true };
+  }
+
+  async addCallAppointment(
+    accountId: string,
+    fields: CallAppointmentCreate,
+  ): Promise<CallAppointment> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders").select("id").eq("account_id", accountId).maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client.from("call_appointments")
+      .insert({ account_holder_id: holder.id, scheduled_at: fields.scheduledAt, phone: fields.phone,
+        reason: fields.reason ?? null, status: "scheduled" })
+      .select("*").maybeSingle();
+    if (error) throw new Error(`Failed to book call appointment: ${error.message}`);
+    if (!data) throw new Error("Call appointment was not created.");
+    return mapCallAppointmentRow(data as CallAppointmentRow);
   }
 }

@@ -1,9 +1,9 @@
-import type { AccountRepo } from "@/lib/account/repo";
+import { PaymentRepoError, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, CallAppointment, RelatedPerson } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
-import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "@/lib/chat/change-summary";
+import { buildAccountHolderUpdateSummary, buildCallAppointmentCreateSummary, buildPaymentSummary, buildPromiseToPayCreateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "@/lib/chat/change-summary";
 import { resolveRelatedPerson } from "@/lib/chat/disambiguate";
-import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "@/lib/chat/validation";
+import { validateAccountHolderUpdate, validateCallAppointmentCreate, validateMockPayment, validatePreferredContactMethodUpdate, validatePromiseToPayCreate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
 export type ReadAction =
@@ -24,6 +24,9 @@ type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "updat
 type RelatedPersonCreateIntent = Extract<ParsedIntent, { action: "add_related_person" }>;
 type RelatedPersonUpdateIntent = Extract<ParsedIntent, { action: "update_related_person" }>;
 type RelatedPersonRemoveIntent = Extract<ParsedIntent, { action: "remove_related_person" }>;
+type PromiseToPayCreateIntent = Extract<ParsedIntent, { action: "create_promise_to_pay" }>;
+type MockPaymentIntent = Extract<ParsedIntent, { action: "mock_payment" }>;
+type CallAppointmentCreateIntent = Extract<ParsedIntent, { action: "book_call_appointment" }>;
 //from routing
 const readIntentActions = new Set<ParsedIntent["action"]>([
   "read_account",
@@ -210,6 +213,98 @@ export async function routeRelatedPersonRemovalConfirmed(input: {
     notificationQueued: true,
     changeSummary: buildRelatedPersonRemoveSummary(removed),
   };
+}
+//for promise to pay actions, we refresh context in UI for instant feedback, and queue a notif for the credit
+export async function routePromiseToPayCreate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: PromiseToPayCreateIntent;
+  rawMessage: string;
+  nowIso: string;
+  repo: Pick<AccountRepo, "addPromiseToPay">;
+}): Promise<ChatActionResult> {
+  const validation = validatePromiseToPayCreate({ intent: input.intent, accountCurrency: input.account.account.currency,
+    nowIso: input.nowIso, rawMessage: input.rawMessage });
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "What amount and future date should I use?", missingFields: validation.intent.missingFields };
+  }
+
+  const created = await input.repo.addPromiseToPay(input.accountId, validation.fields);
+  return {
+    action: "create_promise_to_pay",
+    success: true,
+    reply: `Your promise to pay ${created.currency} ${(created.amountCents / 100).toFixed(2)} by ${created.dueDate} was created.`,
+    account: { ...input.account, promisesToPay: [...input.account.promisesToPay, created] },
+    promisesToPay: [created],
+    notificationQueued: true,
+    changeSummary: buildPromiseToPayCreateSummary(created),
+  };
+}
+
+export async function routeMockPayment(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: MockPaymentIntent;
+  idempotencyKey: string;
+  repo: Pick<AccountRepo, "recordPayment">;
+}): Promise<ChatActionResult> {
+  if (!input.account.paymentOptions.mockPaymentsEnabled) {
+    return { action: "unsupported", success: false, reply: "Payments are not enabled for this account." };
+  }
+  const validation = validateMockPayment({ intent: input.intent, accountCurrency: input.account.account.currency,
+    balanceCents: input.account.account.balanceCents });
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "How much would you like to pay?", missingFields: validation.intent.missingFields };
+  }
+
+  let payment;
+  try {
+    payment = await input.repo.recordPayment(input.accountId, validation.amountCents, input.idempotencyKey);
+  } catch (error) {
+    if (error instanceof PaymentRepoError && error.code === "insufficient_balance") {
+      const reply = validation.exceedsBalance
+        ? "That amount is greater than the current balance. What smaller amount would you like to pay?"
+        : "The balance changed before the payment completed. Please choose an amount no greater than the current balance.";
+      return { action: "clarify", success: false, reply, missingFields: ["amountRaw"] };
+    }
+    throw error;
+  }
+
+  const transactions = input.account.transactions.some((transaction) => transaction.id === payment.transaction.id)
+    ? input.account.transactions
+    : [...input.account.transactions, payment.transaction];
+  const account = { ...input.account,
+    account: { ...input.account.account, balanceCents: payment.newBalanceCents },
+    billing: { ...input.account.billing, currentAmountCents: payment.newBalanceCents },
+    transactions };
+  if (payment.replayed) {
+    return { action: "mock_payment", success: true, reply: "That payment was already recorded, so the account was not charged again.", account,
+      transaction: payment.transaction, transactions: [payment.transaction], changeSummary: [] };
+  }
+
+  return { action: "mock_payment", success: true,
+    reply: `Payment of ${payment.transaction.currency} ${(payment.transaction.amountCents / 100).toFixed(2)} completed using saved payment details. The new balance is ${payment.transaction.currency} ${(payment.newBalanceCents / 100).toFixed(2)}.`,
+    account, transaction: payment.transaction, transactions: [payment.transaction], notificationQueued: true,
+    changeSummary: buildPaymentSummary({ beforeBalanceCents: input.account.account.balanceCents, afterBalanceCents: payment.newBalanceCents, transaction: payment.transaction }) };
+}
+
+export async function routeCallAppointmentCreate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: CallAppointmentCreateIntent;
+  rawMessage: string;
+  nowIso: string;
+  repo: Pick<AccountRepo, "addCallAppointment">;
+}): Promise<ChatActionResult> {
+  const validation = validateCallAppointmentCreate({ intent: input.intent, accountPhone: input.account.account.phone,
+    nowIso: input.nowIso, rawMessage: input.rawMessage });
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "What future date and time should I use?", missingFields: validation.intent.missingFields };
+  }
+  const created = await input.repo.addCallAppointment(input.accountId, validation.fields);
+  return { action: "book_call_appointment", success: true, reply: `Your call appointment was booked for ${created.scheduledAt}.`,
+    account: { ...input.account, callAppointments: [...input.account.callAppointments, created] }, callAppointments: [created],
+    notificationQueued: true, changeSummary: buildCallAppointmentCreateSummary(created) };
 }
 
 type ReadRepo = Pick<AccountRepo, "getAccountContextByAccountId">;

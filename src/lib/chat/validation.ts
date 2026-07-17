@@ -2,7 +2,9 @@ import { z } from "zod";
 
 import type { AccountHolderUpdate } from "@/lib/account/repo";
 import type { RelatedPersonCreate } from "@/lib/account/repo";
-import type { RelatedPersonUpdate } from "@/lib/account/repo";
+import type { CallAppointmentCreate, PromiseToPayCreate, RelatedPersonUpdate } from "@/lib/account/repo";
+import { resolveFutureDate } from "@/lib/llm/dates";
+import { normalizeMoney } from "@/lib/llm/money";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
@@ -10,6 +12,9 @@ type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "updat
 type RelatedPersonCreateIntent = Extract<ParsedIntent, { action: "add_related_person" }>;
 type RelatedPersonUpdateIntent = Extract<ParsedIntent, { action: "update_related_person" }>;
 type RelatedPersonRemoveIntent = Extract<ParsedIntent, { action: "remove_related_person" }>;
+type PromiseToPayCreateIntent = Extract<ParsedIntent, { action: "create_promise_to_pay" }>;
+type MockPaymentIntent = Extract<ParsedIntent, { action: "mock_payment" }>;
+type CallAppointmentCreateIntent = Extract<ParsedIntent, { action: "book_call_appointment" }>;
 //normalizing
 export function sanitizeFreeText(value: string): string {
   return value.normalize("NFC").replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim();
@@ -58,6 +63,11 @@ const relatedPersonRemoveSchema = z.object({
   selector: sanitizedText(100),
 }).strict();
 
+const callAppointmentDetailsSchema = z.object({
+  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)),
+  reason: sanitizedText(500).optional(),
+}).strict();
+
 export type ValidatedAccountUpdateFields = z.infer<typeof updateAccountFieldsSchema>
   & AccountHolderUpdate;
 
@@ -86,6 +96,18 @@ export type RelatedPersonUpdateValidation =
 
 export type RelatedPersonRemoveValidation =
   | { status: "ready"; selector: string }
+  | { status: "clarify"; intent: ParsedIntent };
+
+export type PromiseToPayCreateValidation =
+  | { status: "ready"; fields: PromiseToPayCreate }
+  | { status: "clarify"; intent: ParsedIntent };
+
+export type MockPaymentValidation =
+  | { status: "ready"; amountCents: number; currency: string; exceedsBalance: boolean }
+  | { status: "clarify"; intent: ParsedIntent };
+
+export type CallAppointmentCreateValidation =
+  | { status: "ready"; fields: CallAppointmentCreate }
   | { status: "clarify"; intent: ParsedIntent };
 
 const fieldLabels: Record<string, string> = {
@@ -220,4 +242,76 @@ export function validateRelatedPersonRemove(
       clarificationQuestion: "Which related person should I remove?",
     },
   };
+}
+//validating promise to pay creation
+export function validatePromiseToPayCreate(input: {
+  intent: PromiseToPayCreateIntent;
+  accountCurrency: string;
+  nowIso: string;
+  rawMessage: string;
+}): PromiseToPayCreateValidation {
+  const { amountRaw, dueDate } = input.intent.fields;
+  if (!amountRaw || !dueDate) {
+    const missingFields = [!amountRaw ? "amountRaw" : undefined, !dueDate ? "dueDate" : undefined]
+      .filter((field): field is string => field !== undefined);
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents, missingFields,
+      clarificationQuestion: !amountRaw ? "How much would you like to promise to pay?" : "What future date will you make that payment?" } };
+  }
+
+  const money = normalizeMoney(amountRaw, input.accountCurrency);
+  if (money.status === "clarify") {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["amountRaw"], clarificationQuestion: money.question } };
+  }
+  const date = resolveFutureDate({ rawText: input.rawMessage, llmIso: dueDate, nowIso: input.nowIso, kind: "date" });
+  if (date.status === "clarify") {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["dueDate"], clarificationQuestion: date.question } };
+  }
+
+  return { status: "ready", fields: { amountCents: money.amountCents, currency: money.currency, dueDate: date.iso } };
+}
+
+export function validateMockPayment(input: {
+  intent: MockPaymentIntent;
+  accountCurrency: string;
+  balanceCents: number;
+}): MockPaymentValidation {
+  const amountRaw = input.intent.fields.amountRaw;
+  if (!amountRaw) {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["amountRaw"], clarificationQuestion: "How much would you like to pay?" } };
+  }
+  const money = normalizeMoney(amountRaw, input.accountCurrency);
+  if (money.status === "clarify") {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["amountRaw"], clarificationQuestion: money.question } };
+  }
+  return { status: "ready", amountCents: money.amountCents, currency: money.currency,
+    exceedsBalance: money.amountCents > input.balanceCents };
+}
+
+export function validateCallAppointmentCreate(input: {
+  intent: CallAppointmentCreateIntent;
+  accountPhone: string;
+  nowIso: string;
+  rawMessage: string;
+}): CallAppointmentCreateValidation {
+  const dateTime = input.intent.fields.dateTime;
+  if (!dateTime) {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["dateTime"], clarificationQuestion: "What future date and time should I book the call for?" } };
+  }
+  const date = resolveFutureDate({ rawText: input.rawMessage, llmIso: dateTime, nowIso: input.nowIso, kind: "dateTime" });
+  if (date.status === "clarify") {
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: ["dateTime"], clarificationQuestion: date.question } };
+  }
+  const details = callAppointmentDetailsSchema.safeParse({ phone: input.intent.fields.phone ?? input.accountPhone, reason: input.intent.fields.reason });
+  if (!details.success) {
+    const field = String(details.error.issues[0]?.path[0] ?? "phone");
+    return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
+      missingFields: [field], clarificationQuestion: field === "phone" ? "What phone number should we call? Please include + and the country code." : "What short reason should I add for the call?" } };
+  }
+  return { status: "ready", fields: { scheduledAt: date.iso, ...details.data } };
 }

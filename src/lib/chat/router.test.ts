@@ -2,12 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 
 import standardFixture from "../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture, type AccountContext } from "@/lib/account/types";
+import { PaymentRepoError } from "@/lib/account/repo";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 import {
   futureScheduledCalls,
   isReadIntent,
   routeAccountHolderUpdate,
+  routeCallAppointmentCreate,
+  routeMockPayment,
   routePreferredContactMethodUpdate,
+  routePromiseToPayCreate,
   routeRelatedPersonCreate,
   routeRelatedPersonRemovalConfirmed,
   routeRelatedPersonRemovalRequest,
@@ -199,6 +203,94 @@ describe("related-person removal", () => {
     expect(deleteRelatedPerson).toHaveBeenCalledWith("acc_standard_001", account.relatedPeople[0].id);
     expect(result).toMatchObject({ action: "remove_related_person", success: true, notificationQueued: true,
       account: { relatedPeople: [] }, changeSummary: [{ kind: "removed", entity: "related_person" }] });
+  });
+});
+
+describe("routePromiseToPayCreate", () => {
+  it("creates a validated promise and returns immediate account state", async () => {
+    const created = { id: "promise-002", amountCents: 25050, currency: "EUR", dueDate: "2026-08-01", status: "active" as const, createdAt: "2026-07-17T09:00:00Z" };
+    const addPromiseToPay = vi.fn().mockResolvedValue(created);
+    const intent = { action: "create_promise_to_pay", fields: { amountRaw: "€250.50", dueDate: "2026-08-01" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "create_promise_to_pay" }>;
+    const result = await routePromiseToPayCreate({ accountId: "acc_standard_001", account, intent, rawMessage: "I promise to pay €250.50 on August 1st", nowIso: "2026-07-17T09:00:00Z", repo: { addPromiseToPay } });
+
+    expect(addPromiseToPay).toHaveBeenCalledWith("acc_standard_001", { amountCents: 25050, currency: "EUR", dueDate: "2026-08-01" });
+    expect(result).toMatchObject({ action: "create_promise_to_pay", success: true, notificationQueued: true,
+      account: { promisesToPay: [...account.promisesToPay, created] }, promisesToPay: [created],
+      changeSummary: [{ kind: "created", entity: "promise_to_pay" }] });
+  });
+
+  it("clarifies an invalid promise without inserting", async () => {
+    const addPromiseToPay = vi.fn();
+    const intent = { action: "create_promise_to_pay", fields: { amountRaw: "$250", dueDate: "2026-08-01" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "create_promise_to_pay" }>;
+    const result = await routePromiseToPayCreate({ accountId: "acc_standard_001", account, intent, rawMessage: "I promise to pay $250 on August 1st", nowIso: "2026-07-17T09:00:00Z", repo: { addPromiseToPay } });
+
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["amountRaw"] });
+    expect(addPromiseToPay).not.toHaveBeenCalled();
+  });
+});
+
+describe("routeMockPayment", () => {
+  const idempotencyKey = "00000000-0000-4000-8000-000000000004";
+  const transaction = { id: "transaction-002", type: "payment" as const, status: "completed" as const, amountCents: 15000, currency: "EUR", description: "Chat payment using saved payment details", transactionDate: "2026-07-17" };
+  const intent = { action: "mock_payment", fields: { amountRaw: "€150" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "mock_payment" }>;
+
+  it("records a payment and refreshes both balance projections and transactions", async () => {
+    const recordPayment = vi.fn().mockResolvedValue({ transaction, newBalanceCents: 113500, replayed: false });
+    const result = await routeMockPayment({ accountId: "acc_standard_001", account, intent, idempotencyKey, repo: { recordPayment } });
+
+    expect(recordPayment).toHaveBeenCalledWith("acc_standard_001", 15000, idempotencyKey);
+    expect(result).toMatchObject({ action: "mock_payment", success: true, notificationQueued: true,
+      account: { account: { balanceCents: 113500 }, billing: { currentAmountCents: 113500 }, transactions: [...account.transactions, transaction] },
+      transaction, changeSummary: [{ entity: "account_holder" }, { entity: "transaction" }] });
+    expect(result.reply).toContain("using saved payment details");
+  });
+
+  it("returns an idempotent replay without another notification or change claim", async () => {
+    const replayAccount = { ...account, account: { ...account.account, balanceCents: 10000 }, billing: { ...account.billing, currentAmountCents: 10000 }, transactions: [...account.transactions, transaction] };
+    const result = await routeMockPayment({ accountId: "acc_standard_001", account: replayAccount, intent, idempotencyKey,
+      repo: { recordPayment: vi.fn().mockResolvedValue({ transaction, newBalanceCents: 10000, replayed: true }) } });
+
+    expect(result).toMatchObject({ action: "mock_payment", success: true, changeSummary: [], account: { transactions: replayAccount.transactions } });
+    expect(result).not.toHaveProperty("notificationQueued");
+  });
+
+  it("lets the RPC distinguish a new overpayment from an idempotent replay", async () => {
+    const recordPayment = vi.fn().mockRejectedValue(new PaymentRepoError("insufficient_balance"));
+    const result = await routeMockPayment({ accountId: "acc_standard_001", account,
+      intent: { ...intent, fields: { amountRaw: "€1,286" } }, idempotencyKey, repo: { recordPayment } });
+    expect(result).toMatchObject({ action: "clarify", success: false, reply: expect.stringContaining("greater than the current balance") });
+    expect(recordPayment).toHaveBeenCalledWith("acc_standard_001", 128600, idempotencyKey);
+  });
+
+  it("maps an authoritative concurrent-balance failure to clarification", async () => {
+    const recordPayment = vi.fn().mockRejectedValue(new PaymentRepoError("insufficient_balance"));
+    const result = await routeMockPayment({ accountId: "acc_standard_001", account, intent, idempotencyKey, repo: { recordPayment } });
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["amountRaw"] });
+  });
+});
+
+describe("routeCallAppointmentCreate", () => {
+  const intent = { action: "book_call_appointment", fields: { dateTime: "2026-07-21T10:00:00+01:00", reason: "Discuss my account" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "book_call_appointment" }>;
+
+  it("books a validated call and returns immediate account state", async () => {
+    const created = { id: "call-002", scheduledAt: "2026-07-21T09:00:00.000Z", phone: account.account.phone, reason: "Discuss my account", status: "scheduled" as const };
+    const addCallAppointment = vi.fn().mockResolvedValue(created);
+    const result = await routeCallAppointmentCreate({ accountId: "acc_standard_001", account, intent,
+      rawMessage: "Book a call next Tuesday at 10am to discuss my account", nowIso: "2026-07-16T15:00:00Z", repo: { addCallAppointment } });
+
+    expect(addCallAppointment).toHaveBeenCalledWith("acc_standard_001", { scheduledAt: created.scheduledAt, phone: account.account.phone, reason: created.reason });
+    expect(result).toMatchObject({ action: "book_call_appointment", success: true, notificationQueued: true,
+      account: { callAppointments: [...account.callAppointments, created] }, callAppointments: [created],
+      changeSummary: [{ kind: "created", entity: "call_appointment" }] });
+  });
+
+  it("clarifies a past appointment without inserting", async () => {
+    const addCallAppointment = vi.fn();
+    const result = await routeCallAppointmentCreate({ accountId: "acc_standard_001", account,
+      intent: { ...intent, fields: { dateTime: "2026-07-15T10:00:00+01:00" } }, rawMessage: "Book a call yesterday at 10am",
+      nowIso: "2026-07-16T15:00:00Z", repo: { addCallAppointment } });
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["dateTime"] });
+    expect(addCallAppointment).not.toHaveBeenCalled();
   });
 });
 

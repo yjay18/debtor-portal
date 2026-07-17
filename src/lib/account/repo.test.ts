@@ -10,11 +10,14 @@ import {
   mapRelatedPersonCreate,
   mapRelatedPersonUpdate,
   mapTransactionRow,
+  PaymentRepoError,
   SupabaseAccountRepo,
   type AccountHolderRow,
   type AccountHolderUpdate,
+  type CallAppointmentCreate,
   type CallAppointmentRow,
   type PromiseToPayRow,
+  type PromiseToPayCreate,
   type RelatedPersonRow,
   type RelatedPersonCreate,
   type RelatedPersonUpdate,
@@ -160,6 +163,7 @@ const transactionRow: TransactionRow = {
   currency: "EUR",
   description: "Card payment",
   transaction_date: "2026-01-10",
+  idempotency_key: null,
   created_at: "2026-01-10T09:00:00Z",
 };
 
@@ -449,6 +453,40 @@ function createRelatedPersonDeleteClient(holder: FakeQueryResult, relatedPerson:
   return { client: { from }, remove, personEq, holderEq, select };
 }
 
+function createPromiseInsertClient(holder: FakeQueryResult, promise: FakeQueryResult) {
+  const inserted = vi.fn(() => ({ select: () => ({ maybeSingle: () => Promise.resolve(promise) }) }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(holder) }) }) }
+    : { insert: inserted });
+  return { client: { from }, from, inserted };
+}
+
+function createCallAppointmentInsertClient(holder: FakeQueryResult, appointment: FakeQueryResult) {
+  const inserted = vi.fn(() => ({ select: () => ({ maybeSingle: () => Promise.resolve(appointment) }) }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(holder) }) }) }
+    : { insert: inserted });
+  return { client: { from }, from, inserted };
+}
+
+function createPaymentClient(input: {
+  rpc: { data: unknown; error: { message: string; code?: string } | null };
+  transaction?: FakeQueryResult;
+  balance?: FakeQueryResult;
+}) {
+  const holder = { data: { id: "holder-001" }, error: null };
+  const transactionResult = input.transaction ?? { data: { ...transactionRow, id: "00000000-0000-4000-8000-000000000005", idempotency_key: "00000000-0000-4000-8000-000000000004" }, error: null };
+  const balanceResult = input.balance ?? { data: { balance_cents: 113500 }, error: null };
+  const secondTransactionEq = vi.fn(() => ({ maybeSingle: () => Promise.resolve(transactionResult) }));
+  const firstTransactionEq = vi.fn(() => ({ eq: secondTransactionEq }));
+  const accountSelect = vi.fn((columns: string) => ({ eq: () => ({ maybeSingle: () => Promise.resolve(columns === "id" ? holder : balanceResult) }) }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: accountSelect }
+    : { select: () => ({ eq: firstTransactionEq }) });
+  const rpc = vi.fn().mockResolvedValue(input.rpc);
+  return { client: { from, rpc }, rpc, accountSelect, firstTransactionEq, secondTransactionEq };
+}
+
 it("resolves the account holder before inserting a related person", async () => {
   const query = createRelatedPersonInsertClient({ data: { id: "holder-001" }, error: null }, { data: { ...relatedPersonRow, name: "Mark Murphy" }, error: null });
   await expect(new SupabaseAccountRepo(query.client as never).addRelatedPerson("acc_standard_001", { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true }))
@@ -477,6 +515,58 @@ it("scopes a related-person deletion to the resolved account holder", async () =
   expect(query.personEq).toHaveBeenCalledWith("id", "person-001");
   expect(query.holderEq).toHaveBeenCalledWith("account_holder_id", "holder-001");
   expect(query.select).toHaveBeenCalledWith("*");
+});
+
+it("resolves the account holder before inserting an active promise", async () => {
+  const fields: PromiseToPayCreate = { amountCents: 25050, currency: "EUR", dueDate: "2026-08-01" };
+  const query = createPromiseInsertClient({ data: { id: "holder-001" }, error: null }, { data: { ...promiseRow, ...{ amount_cents: 25050, due_date: "2026-08-01" } }, error: null });
+
+  await expect(new SupabaseAccountRepo(query.client as never).addPromiseToPay("acc_standard_001", fields))
+    .resolves.toMatchObject({ amountCents: 25050, currency: "EUR", dueDate: "2026-08-01", status: "active" });
+  expect(query.from).toHaveBeenNthCalledWith(1, "account_holders");
+  expect(query.from).toHaveBeenNthCalledWith(2, "promises_to_pay");
+  expect(query.inserted).toHaveBeenCalledWith({ account_holder_id: "holder-001", amount_cents: 25050, currency: "EUR", due_date: "2026-08-01", status: "active" });
+});
+
+it("maps the atomic record_payment RPC result and loads its transaction", async () => {
+  const query = createPaymentClient({ rpc: { data: [{ transaction_id: "00000000-0000-4000-8000-000000000005", new_balance_cents: 113500, replayed: false }], error: null } });
+  const result = await new SupabaseAccountRepo(query.client as never)
+    .recordPayment("acc_standard_001", 15000, "00000000-0000-4000-8000-000000000004");
+
+  expect(query.rpc).toHaveBeenCalledWith("record_payment", { p_account_holder_id: "holder-001", p_amount_cents: 15000, p_idempotency_key: "00000000-0000-4000-8000-000000000004" });
+  expect(query.firstTransactionEq).toHaveBeenCalledWith("id", "00000000-0000-4000-8000-000000000005");
+  expect(query.secondTransactionEq).toHaveBeenCalledWith("account_holder_id", "holder-001");
+  expect(result).toMatchObject({ newBalanceCents: 113500, replayed: false, transaction: { id: "00000000-0000-4000-8000-000000000005", amountCents: 5000 } });
+});
+
+it("recovers a concurrent same-key unique conflict as an idempotent replay", async () => {
+  const query = createPaymentClient({ rpc: { data: null, error: { code: "23505", message: "duplicate key" } } });
+  const result = await new SupabaseAccountRepo(query.client as never)
+    .recordPayment("acc_standard_001", 15000, "00000000-0000-4000-8000-000000000004");
+
+  expect(query.firstTransactionEq).toHaveBeenCalledWith("idempotency_key", "00000000-0000-4000-8000-000000000004");
+  expect(query.accountSelect).toHaveBeenCalledWith("balance_cents");
+  expect(result).toMatchObject({ newBalanceCents: 113500, replayed: true, transaction: { id: "00000000-0000-4000-8000-000000000005" } });
+});
+
+it("normalizes an authoritative insufficient-balance RPC error", async () => {
+  const query = createPaymentClient({ rpc: { data: null, error: { message: "INSUFFICIENT_BALANCE" } } });
+  await expect(new SupabaseAccountRepo(query.client as never)
+    .recordPayment("acc_standard_001", 15000, "00000000-0000-4000-8000-000000000004"))
+    .rejects.toEqual(new PaymentRepoError("insufficient_balance"));
+});
+
+it("resolves the holder before inserting a scheduled call appointment", async () => {
+  const fields: CallAppointmentCreate = { scheduledAt: "2026-07-21T09:00:00.000Z", phone: "+353831234567", reason: "Discuss my account" };
+  const query = createCallAppointmentInsertClient({ data: { id: "holder-001" }, error: null },
+    { data: { ...callRow, id: "call-002", scheduled_at: fields.scheduledAt, phone: fields.phone, reason: fields.reason }, error: null });
+
+  await expect(new SupabaseAccountRepo(query.client as never).addCallAppointment("acc_standard_001", fields))
+    .resolves.toEqual({ id: "call-002", scheduledAt: fields.scheduledAt, phone: fields.phone, reason: fields.reason, status: "scheduled" });
+  expect(query.from).toHaveBeenNthCalledWith(1, "account_holders");
+  expect(query.from).toHaveBeenNthCalledWith(2, "call_appointments");
+  expect(query.inserted).toHaveBeenCalledWith({ account_holder_id: "holder-001", scheduled_at: fields.scheduledAt,
+    phone: fields.phone, reason: fields.reason, status: "scheduled" });
 });
 
 it("updates only supplied fields and returns the persisted holder", async () => {
