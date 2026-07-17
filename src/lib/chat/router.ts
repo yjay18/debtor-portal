@@ -215,7 +215,7 @@ export async function routeRelatedPersonRemovalConfirmed(input: {
     changeSummary: buildRelatedPersonRemoveSummary(removed),
   };
 }
-//for promise to pay actions, we refresh context in UI for instant feedback, and queue a notif for the credit
+// for promise to pay actions, we refresh context in UI for instant feedback, and queue a notif for the credit
 export async function routePromiseToPayCreate(input: {
   accountId: string;
   account: AccountContext;
