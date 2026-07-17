@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 
 import standardFixture from "../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture } from "@/lib/account/types";
-import { deliverAccountChangeNotification, derivePdfPassword, type AccountChangeNotification } from "./account-change-notification";
+import { DEFAULT_RESEND_FROM_EMAIL, deliverAccountChangeNotification, derivePdfPassword, type AccountChangeNotification } from "./account-change-notification";
 
 const accountSnapshot = normalizeLegacyFixture(standardFixture);
 const notification: AccountChangeNotification = {
@@ -46,6 +46,12 @@ it("sends a generic email with the encrypted PDF attached", async () => {
     expect(email.text).not.toContain(sensitive);
   }
   expect(result).toEqual({ notificationId: "email-id", sent: true, redactedRecipient: "j***@e***.test" });
+});
+
+it("uses the Resend test sender when no sender is configured", async () => {
+  const sendEmail = vi.fn().mockResolvedValue({ data: { id: "email-id" }, error: null, headers: null });
+  await deliverAccountChangeNotification(notification, { buildPdf: vi.fn().mockResolvedValue(Buffer.from("pdf")), sendEmail, log: vi.fn(), now });
+  expect(sendEmail).toHaveBeenCalledWith(expect.objectContaining({ from: DEFAULT_RESEND_FROM_EMAIL }));
 });
 
 it("replaces provider details with a fixed delivery failure", async () => {

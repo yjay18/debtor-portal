@@ -4,6 +4,8 @@ import { Resend, type CreateEmailOptions, type CreateEmailResponse } from "resen
 import { buildAccountSummaryPdf } from "./pdf";
 import { redactEmailRecipient } from "./redact";
 
+export const DEFAULT_RESEND_FROM_EMAIL = "onboarding@resend.dev";
+
 export type AccountChangeNotification = {
   accountId: string;
   changedBy: "account_holder" | "authorized_representative";
@@ -49,8 +51,8 @@ export async function deliverAccountChangeNotification(
     deps.log({ event: "notification_delivery_skipped", redactedRecipient });
     return { notificationId: "logged-without-provider", sent: false, redactedRecipient };
   }
-  const from = deps.fromEmail?.trim();
-  if (!from || /[\r\n]/.test(from)) throw new Error("Notification sender is not configured safely.");
+  const from = deps.fromEmail?.trim() || DEFAULT_RESEND_FROM_EMAIL;
+  if (/[\r\n]/.test(from)) throw new Error("Notification sender is not configured safely.");
   const pdf = await deps.buildPdf(notification.accountSnapshot, derivePdfPassword(notification.accountSnapshot.account.phone));
   //resend payload
   let response: CreateEmailResponse;
