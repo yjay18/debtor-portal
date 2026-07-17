@@ -60,6 +60,13 @@ describe("buildParserMessages", () => {
     expect(prompt).toContain("message-2");
     expect(prompt).toContain("message-9");
   });
+
+  it("distinguishes an immediate payment from a future promise", () => {
+    const instruction = buildParserMessages({ ...input, message: "Pay €5 now" })[0].content;
+
+    expect(instruction).toContain("mock_payment only when the customer wants to pay now using saved payment details");
+    expect(instruction).toContain("create_promise_to_pay only when they commit to pay a stated amount on a future date");
+  });
 });
 
 describe("parseMessage", () => {
