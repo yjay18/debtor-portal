@@ -8,6 +8,7 @@ import {
   isReadIntent,
   routeAccountHolderUpdate,
   routePreferredContactMethodUpdate,
+  routeRelatedPersonCreate,
   routeReadAction,
   type ReadAction,
   type ReadIntent,
@@ -122,6 +123,27 @@ describe("routePreferredContactMethodUpdate", () => {
 
     expect(result).toMatchObject({ success: true, changeSummary: [] });
     expect(updateAccountHolder).not.toHaveBeenCalled();
+  });
+});
+
+describe("routeRelatedPersonCreate", () => {
+  it("creates a validated related person and returns immediate account state", async () => {
+    const created = { id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true };
+    const addRelatedPerson = vi.fn().mockResolvedValue(created);
+    const intent: Extract<ParsedIntent, { action: "add_related_person" }> = { action: "add_related_person", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true }, additionalIntents: [], missingFields: [] };
+    const result = await routeRelatedPersonCreate({ accountId: "acc_standard_001", account, intent, repo: { addRelatedPerson } });
+
+    expect(addRelatedPerson).toHaveBeenCalledWith("acc_standard_001", { ...intent.fields, authorizedToAct: true });
+    expect(result).toMatchObject({ action: "add_related_person", success: true, notificationQueued: true, account: { relatedPeople: [...account.relatedPeople, created] }, changeSummary: [{ kind: "created", entity: "related_person" }] });
+  });
+
+  it("clarifies missing contact details without inserting", async () => {
+    const addRelatedPerson = vi.fn();
+    const intent = { action: "add_related_person", fields: { name: "Mark" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "add_related_person" }>;
+    const result = await routeRelatedPersonCreate({ accountId: "acc_standard_001", account, intent, repo: { addRelatedPerson } });
+
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: expect.arrayContaining(["email", "phone"]) });
+    expect(addRelatedPerson).not.toHaveBeenCalled();
   });
 });
 

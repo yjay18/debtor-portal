@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate } from "./validation";
+import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate } from "./validation";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 
@@ -117,5 +117,17 @@ describe("validatePreferredContactMethodUpdate", () => {
   it("clarifies an omitted method without trusting parser completeness", () => {
     expect(validatePreferredContactMethodUpdate({ action: "update_preferred_contact_method", fields: {}, additionalIntents: [], missingFields: [] }))
       .toMatchObject({ status: "clarify", intent: { action: "clarify", missingFields: ["method"] } });
+  });
+});
+
+describe("validateRelatedPersonCreate", () => {
+  it("sanitizes required contact fields and defaults authorization to false", () => {
+    expect(validateRelatedPersonCreate({ action: "add_related_person", fields: { name: " Mark O'Brien ", email: " mark@example.test ", phone: " +353831112233 ", relationship: " brother " }, additionalIntents: [], missingFields: [] }))
+      .toEqual({ status: "ready", fields: { name: "Mark O'Brien", email: "mark@example.test", phone: "+353831112233", relationship: "brother", authorizedToAct: false } });
+  });
+
+  it("clarifies when a required contact detail is absent", () => {
+    expect(validateRelatedPersonCreate({ action: "add_related_person", fields: { name: "Mark", phone: "+353831112233" }, additionalIntents: [], missingFields: [] }))
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["email"] } });
   });
 });

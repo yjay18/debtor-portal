@@ -1,8 +1,8 @@
 import type { AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, CallAppointment } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
-import { buildAccountHolderUpdateSummary, previewAccountHolderUpdate } from "@/lib/chat/change-summary";
-import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate } from "@/lib/chat/validation";
+import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, previewAccountHolderUpdate } from "@/lib/chat/change-summary";
+import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
 export type ReadAction =
@@ -20,6 +20,7 @@ export type ReadIntent = Extract<
 >;
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
+type RelatedPersonCreateIntent = Extract<ParsedIntent, { action: "add_related_person" }>;
 //from routing
 const readIntentActions = new Set<ParsedIntent["action"]>([
   "read_account",
@@ -94,6 +95,29 @@ export async function routePreferredContactMethodUpdate(input: {
     account: { ...input.account, account: updated },
     notificationQueued: true,
     changeSummary: buildAccountHolderUpdateSummary(before, updated, fields),
+  };
+}
+//we refresh the account context in UI after adding related person for instant feedback
+export async function routeRelatedPersonCreate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: RelatedPersonCreateIntent;
+  repo: Pick<AccountRepo, "addRelatedPerson">;
+}): Promise<ChatActionResult> {
+  const validation = validateRelatedPersonCreate(input.intent);
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "What details should I use?", missingFields: validation.intent.missingFields };
+  }
+
+  const created = await input.repo.addRelatedPerson(input.accountId, validation.fields);
+  return {
+    action: "add_related_person",
+    success: true,
+    reply: `${created.name} was added to your account.`,
+    account: { ...input.account, relatedPeople: [...input.account.relatedPeople, created] },
+    relatedPeople: [created],
+    notificationQueued: true,
+    changeSummary: buildRelatedPersonCreateSummary(created),
   };
 }
 

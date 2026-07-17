@@ -7,6 +7,7 @@ import {
   mapCallAppointmentRow,
   mapPromiseToPayRow,
   mapRelatedPersonRow,
+  mapRelatedPersonCreate,
   mapTransactionRow,
   SupabaseAccountRepo,
   type AccountHolderRow,
@@ -14,6 +15,7 @@ import {
   type CallAppointmentRow,
   type PromiseToPayRow,
   type RelatedPersonRow,
+  type RelatedPersonCreate,
   type TransactionRow,
 } from "./repo";
 //testing important fields with this one
@@ -109,6 +111,11 @@ it("maps a related-person row into the domain contract", () => {
 it("maps a missing optional relationship to undefined", () => {
   expect(mapRelatedPersonRow({ ...relatedPersonRow, relationship: null }))
     .toHaveProperty("relationship", undefined);
+});
+
+it("maps a related-person create payload without database-only fields", () => {
+  const fields: RelatedPersonCreate = { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false };
+  expect(mapRelatedPersonCreate(fields)).toEqual({ name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: null, authorized_to_act: false });
 });
 
 const promiseRow: PromiseToPayRow = {
@@ -402,6 +409,22 @@ function createUpdateClient(result: FakeQueryResult) {
   const from = vi.fn(() => ({ update }));
   return { client: { from }, from, update, eq, select, maybeSingle };
 }
+
+function createRelatedPersonInsertClient(holder: FakeQueryResult, relatedPerson: FakeQueryResult) {
+  const inserted = vi.fn(() => ({ select: () => ({ maybeSingle: () => Promise.resolve(relatedPerson) }) }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(holder) }) }) }
+    : { insert: inserted });
+  return { client: { from }, from, inserted };
+}
+
+it("resolves the account holder before inserting a related person", async () => {
+  const query = createRelatedPersonInsertClient({ data: { id: "holder-001" }, error: null }, { data: { ...relatedPersonRow, name: "Mark Murphy" }, error: null });
+  await expect(new SupabaseAccountRepo(query.client as never).addRelatedPerson("acc_standard_001", { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true }))
+    .resolves.toMatchObject({ id: "person-001", name: "Mark Murphy", authorizedToAct: false });
+  expect(query.from).toHaveBeenNthCalledWith(1, "account_holders");
+  expect(query.inserted).toHaveBeenCalledWith({ account_holder_id: "holder-001", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: null, authorized_to_act: true });
+});
 
 it("updates only supplied fields and returns the persisted holder", async () => {
   const updatedRow = { ...row, phone: "+353831112233" };

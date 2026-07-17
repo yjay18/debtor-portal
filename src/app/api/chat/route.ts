@@ -4,7 +4,7 @@ import { z } from "zod";
 import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
-import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction } from "@/lib/chat/router";
+import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction, routeRelatedPersonCreate } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -52,7 +52,7 @@ type ReadTurnLoaders = {
 
 type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations" | "repo"> & {
   conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage">;
-  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder">;
+  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder" | "addRelatedPerson">;
   parse: (input: ParserInput) => Promise<ParsedIntent>;
   processNotifications: (accountHolderId: string) => ReturnType<typeof processQueuedNotifications>;
 };
@@ -109,7 +109,7 @@ export async function routeLoadedIntent(input: {
   account: AccountContext;
   intent: ParsedIntent;
   nowIso: string;
-  repo: Pick<AccountRepo, "updateAccountHolder">;
+  repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson">;
 }): Promise<ChatActionResult> {
   if (input.intent.action === "update_account_holder") {
     return routeAccountHolderUpdate({
@@ -128,11 +128,21 @@ export async function routeLoadedIntent(input: {
       repo: input.repo,
     });
   }
+  if (input.intent.action === "add_related_person") {
+    return routeRelatedPersonCreate({
+      accountId: input.accountId,
+      account: input.account,
+      intent: input.intent,
+      repo: input.repo,
+    });
+  }
   return routeLoadedReadIntent(input);
 }
 
 function isPersistedMutation(action: ChatActionResult["action"]) {
-  return action === "update_account_holder" || action === "update_preferred_contact_method";
+  return action === "update_account_holder"
+    || action === "update_preferred_contact_method"
+    || action === "add_related_person";
 }
 //persists the result of a read turn using an assistant message to store metadata
 // this makes it three actions 
@@ -156,7 +166,9 @@ export async function persistAssistantResult(input: {
       validationOutcome: input.result.success
         ? mutation ? mutationChanged ? "mutation_succeeded" : "mutation_noop" : "read_succeeded"
         : "not_completed",
-      touchedIds: mutationChanged && input.result.account ? [input.result.account.account.accountId] : [],
+      touchedIds: mutationChanged && input.result.account
+        ? [input.result.account.account.accountId, ...(input.result.relatedPeople?.map((person) => person.id) ?? [])]
+        : [],
       ...(input.result.notificationQueued
         ? { notificationStatus: input.notificationStatus ?? "queued" }
         : {}),

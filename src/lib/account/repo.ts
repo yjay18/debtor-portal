@@ -228,6 +228,24 @@ export type AccountHolderUpdate = {
   country?: string;
   preferredContactMethod?: AccountHolder["preferredContactMethod"];
 };
+
+export type RelatedPersonCreate = {
+  name: string;
+  email: string;
+  phone: string;
+  relationship?: string;
+  authorizedToAct: boolean;
+};
+
+export function mapRelatedPersonCreate(fields: RelatedPersonCreate) {
+  return {
+    name: fields.name,
+    email: fields.email,
+    phone: fields.phone,
+    relationship: fields.relationship ?? null,
+    authorized_to_act: fields.authorizedToAct,
+  };
+}
 // to convert from Typescript camelcase to posgres snake case
 //and we remove undefined entries to avoid overwriting and prevent field data leakage
 export function mapAccountHolderUpdate(fields: AccountHolderUpdate): Record<string, string> {
@@ -280,6 +298,10 @@ export interface AccountRepo {
     accountId: string,
     fields: AccountHolderUpdate,
   ): Promise<AccountHolder>;
+  addRelatedPerson(
+    accountId: string,
+    fields: RelatedPersonCreate,
+  ): Promise<RelatedPerson>;
 }
 //wrapper class to create supa client and fetch acc context
 export class SupabaseAccountRepo implements AccountRepo {
@@ -360,5 +382,28 @@ export class SupabaseAccountRepo implements AccountRepo {
     if (!data) throw new Error("Account not found.");
 
     return mapAccountHolderRow(data as AccountHolderRow);
+  }
+//we attach the related persons to the account holders themselves
+  async addRelatedPerson(
+    accountId: string,
+    fields: RelatedPersonCreate,
+  ): Promise<RelatedPerson> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("id")
+      .eq("account_id", accountId)
+      .maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client
+      .from("related_people")
+      .insert({ account_holder_id: holder.id, ...mapRelatedPersonCreate(fields) })
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(`Failed to add related person: ${error.message}`);
+    if (!data) throw new Error("Related person was not created.");
+
+    return mapRelatedPersonRow(data as RelatedPersonRow);
   }
 }

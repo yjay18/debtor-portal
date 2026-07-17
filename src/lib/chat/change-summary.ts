@@ -1,4 +1,5 @@
 import type { AccountHolder } from "@/lib/account/types";
+import type { RelatedPerson } from "@/lib/account/types";
 import type { AccountHolderUpdate } from "@/lib/account/repo";
 import type { ChangeSummary } from "./types";
 
@@ -9,6 +10,27 @@ export function buildUpdateSummary(input: {
 }): ChangeSummary[] {
   const fields = input.fields.filter((field) => field.before !== field.after);
   return fields.length ? [{ kind: "updated", entity: input.entity, label: input.label, fields }] : [];
+}
+
+export function buildCreateSummary(input: {
+  entity: ChangeSummary["entity"];
+  label: string;
+  fields: Array<{ field: string; after: string }>;
+}): ChangeSummary[] {
+  return [{ kind: "created", entity: input.entity, label: input.label, fields: input.fields }];
+}
+
+export function buildRelatedPersonCreateSummary(person: RelatedPerson): ChangeSummary[] {
+  return buildCreateSummary({
+    entity: "related_person",
+    label: person.name,
+    fields: [
+      { field: "Email", after: person.email },
+      { field: "Phone", after: person.phone },
+      ...(person.relationship ? [{ field: "Relationship", after: person.relationship }] : []),
+      { field: "Authorized to act", after: person.authorizedToAct ? "Yes" : "No" },
+    ],
+  });
 }
 
 export function previewAccountHolderUpdate(holder: AccountHolder, fields: AccountHolderUpdate): AccountHolder {
