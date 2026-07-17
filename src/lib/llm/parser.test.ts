@@ -69,6 +69,7 @@ describe("buildParserMessages", () => {
     expect(instruction).toContain("Pay €50 today\" means mock_payment with amountRaw and no dueDate");
     expect(instruction).toContain("I promise to pay €50 on 2026-08-01\" means create_promise_to_pay with amountRaw and dueDate");
     expect(instruction).toContain("exclude timing words such as \"now\"");
+    expect(instruction).toContain("pay a full balance or clear what is owed");
     expect(instruction).toContain("complete offset timestamp such as 2026-07-18T15:00:00+01:00");
     expect(instruction).toContain("do not infer it from authorization wording");
     expect(instruction).toContain("even when it is a local-format number without a country code");

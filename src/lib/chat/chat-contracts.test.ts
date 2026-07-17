@@ -145,4 +145,22 @@ describe("confirmed multi-intent queue", () => {
     expect(result.result.reply).toBe("That queued request was skipped.");
     expect(updateDialogState).toHaveBeenCalledWith(conversation, { queuedIntents: [] });
   });
+
+  it("uses the original request to validate a confirmed queued promise", async () => {
+    const promise = { id: "promise-002", amountCents: 50000, currency: "EUR", dueDate: "2026-08-01", status: "active" as const, createdAt: nowIso };
+    const addPromiseToPay = vi.fn().mockResolvedValue(promise);
+    const conversation = { ...baseConversation, dialogState: { queuedIntents: [], awaitingConfirmation: {
+      kind: "next_intent" as const, intent: { action: "create_promise_to_pay" as const, fields: { amountRaw: "500 euro", dueDate: "2026-08-01" } },
+    } } };
+    const result = await executeReadChatTurn({ accountId, message: "yes", idempotencyKey: "00000000-0000-4000-8000-000000000007" }, {
+      conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([
+        { role: "account_holder" as const, content: "Show my account and promise to pay 500 euro on August 1st" },
+        { role: "assistant" as const, content: "Reply yes to continue" },
+      ]), addMessage: vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "message-2", content: "Promise", createdAt: nowIso }), updateDialogState: vi.fn() },
+      repo: { ...repo, addPromiseToPay }, now: () => nowIso, processNotifications: vi.fn().mockResolvedValue({ status: "logged", attemptCount: 1 }), parse: vi.fn(),
+    });
+
+    expect(addPromiseToPay).toHaveBeenCalledWith(accountId, { amountCents: 50000, currency: "EUR", dueDate: "2026-08-01" });
+    expect(result.result).toMatchObject({ action: "create_promise_to_pay", success: true });
+  });
 });

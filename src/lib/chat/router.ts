@@ -108,9 +108,10 @@ export async function routeRelatedPersonCreate(input: {
   accountId: string;
   account: AccountContext;
   intent: RelatedPersonCreateIntent;
+  rawMessage?: string;
   repo: Pick<AccountRepo, "addRelatedPerson">;
 }): Promise<ChatActionResult> {
-  const validation = validateRelatedPersonCreate(input.intent);
+  const validation = validateRelatedPersonCreate(input.intent, input.rawMessage);
   if (validation.status === "clarify") {
     return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "What details should I use?", missingFields: validation.intent.missingFields };
   }

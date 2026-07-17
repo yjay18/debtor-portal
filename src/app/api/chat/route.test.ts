@@ -99,10 +99,10 @@ describe("routeLoadedIntent", () => {
   it("routes related-person creation to the scoped insert", async () => {
     const account = normalizeLegacyFixture(standardFixture);
     const addRelatedPerson = vi.fn().mockResolvedValue({ id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false });
-    const intent = { action: "add_related_person", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233" } } as ParsedIntent;
-    const result = await routeLoadedIntent({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder: vi.fn(), addRelatedPerson, updateRelatedPerson: vi.fn(), addPromiseToPay: vi.fn(), recordPayment: vi.fn(), addCallAppointment: vi.fn() }, nowIso: "unused", rawMessage: "unused", idempotencyKey: validRequest.idempotencyKey });
+    const intent = { action: "add_related_person", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: "undefined" } } as ParsedIntent;
+    const result = await routeLoadedIntent({ accountId: "acc_standard_001", account, intent, repo: { updateAccountHolder: vi.fn(), addRelatedPerson, updateRelatedPerson: vi.fn(), addPromiseToPay: vi.fn(), recordPayment: vi.fn(), addCallAppointment: vi.fn() }, nowIso: "unused", rawMessage: "Add Mark Murphy so he can act for me.", relatedPersonRawMessage: "Add Mark Murphy so he can act for me.", idempotencyKey: validRequest.idempotencyKey });
 
-    expect(addRelatedPerson).toHaveBeenCalledOnce();
+    expect(addRelatedPerson).toHaveBeenCalledWith("acc_standard_001", expect.not.objectContaining({ relationship: expect.anything() }));
     expect(result).toMatchObject({ action: "add_related_person", success: true, notificationQueued: true });
   });
 
@@ -216,11 +216,12 @@ describe("executeReadChatTurn", () => {
       repo: { getAccountContextByAccountId: vi.fn().mockResolvedValue(account), updateAccountHolder: vi.fn().mockResolvedValue({ ...account.account, preferredContactMethod: "sms" }), addRelatedPerson: vi.fn(), updateRelatedPerson: vi.fn(), deleteRelatedPerson: vi.fn(), addPromiseToPay: vi.fn(), recordPayment: vi.fn(), addCallAppointment: vi.fn() },
       now: () => "2026-07-16T17:00:00+01:00",
       parse: vi.fn().mockResolvedValue({ action: "update_preferred_contact_method", fields: { method: "sms" } } as ParsedIntent),
-      processNotifications: vi.fn().mockResolvedValue({ status: "logged", attemptCount: 1 }),
+      processNotifications: vi.fn().mockResolvedValue({ status: "sent", attemptCount: 1 }),
     });
 
     expect(response.result).toMatchObject({ action: "update_preferred_contact_method", notificationQueued: true });
-    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_preferred_contact_method", metadata: expect.objectContaining({ validationOutcome: "mutation_succeeded", notificationStatus: "logged" }) }));
+    expect(response.result.reply).toContain("confirmation email was sent");
+    expect(addMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ action: "update_preferred_contact_method", metadata: expect.objectContaining({ validationOutcome: "mutation_succeeded", notificationStatus: "sent" }) }));
   });
 
   it("keeps a committed update successful when notification processing fails", async () => {

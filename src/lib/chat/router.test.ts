@@ -144,6 +144,16 @@ describe("routeRelatedPersonCreate", () => {
     expect(result).toMatchObject({ action: "add_related_person", success: true, notificationQueued: true, account: { relatedPeople: [...account.relatedPeople, created] }, changeSummary: [{ kind: "created", entity: "related_person" }] });
   });
 
+  it("does not persist a relationship the message did not state", async () => {
+    const created = { id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true };
+    const addRelatedPerson = vi.fn().mockResolvedValue(created);
+    const intent: Extract<ParsedIntent, { action: "add_related_person" }> = { action: "add_related_person", fields: { name: created.name, email: created.email, phone: created.phone, relationship: "undefined", authorizedToAct: true }, additionalIntents: [], missingFields: [] };
+
+    await routeRelatedPersonCreate({ accountId: "acc_standard_001", account, intent, rawMessage: "Add Mark Murphy so he can act for me.", repo: { addRelatedPerson } });
+
+    expect(addRelatedPerson).toHaveBeenCalledWith("acc_standard_001", { name: created.name, email: created.email, phone: created.phone, authorizedToAct: true });
+  });
+
   it("clarifies missing contact details without inserting", async () => {
     const addRelatedPerson = vi.fn();
     const intent = { action: "add_related_person", fields: { name: "Mark" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "add_related_person" }>;

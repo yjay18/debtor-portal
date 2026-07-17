@@ -38,6 +38,15 @@ describe("resolveFutureDate", () => {
     ).toMatchObject({ status: "ready" });
   });
 
+  it("rejects a call time equal to the trusted current instant", () => {
+    expect(resolveFutureDate({
+      rawText: "today at 4pm",
+      llmIso: "2026-07-16T16:00:00+01:00",
+      nowIso,
+      kind: "dateTime",
+    })).toMatchObject({ status: "clarify", reason: "not_future" });
+  });
+
   it.each([
     ["tomorrow", "2026-07-18", "date"],
     ["next Tuesday at 10am", "2026-07-21T11:00:00+01:00", "dateTime"],

@@ -128,7 +128,25 @@ describe("validateRelatedPersonCreate", () => {
 
   it("clarifies when a required contact detail is absent", () => {
     expect(validateRelatedPersonCreate({ action: "add_related_person", fields: { name: "Mark", phone: "+353831112233" }, additionalIntents: [], missingFields: [] }))
-      .toMatchObject({ status: "clarify", intent: { missingFields: ["email"] } });
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["email"], clarificationQuestion: "To add someone, what is their email address?" } });
+  });
+
+  it("keeps only a relationship explicitly stated by the customer", () => {
+    const intent: Extract<ParsedIntent, { action: "add_related_person" }> = { action: "add_related_person", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: "undefined", authorizedToAct: true }, additionalIntents: [], missingFields: [] };
+
+    expect(validateRelatedPersonCreate(intent, "Add Mark Murphy so he can act for me."))
+      .toEqual({ status: "ready", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true } });
+    expect(validateRelatedPersonCreate({ ...intent, fields: { ...intent.fields, relationship: "brother" } }, "Add my brother Mark Murphy, mark@example.test, +353831112233."))
+      .toMatchObject({ status: "ready", fields: { relationship: "brother" } });
+  });
+
+  it("requires a complete relationship word while accepting punctuation in a stated label", () => {
+    const intent = { action: "add_related_person", fields: { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: "son" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "add_related_person" }>;
+
+    expect(validateRelatedPersonCreate(intent, "Add a person called Mark Murphy, mark@example.test, +353831112233."))
+      .toMatchObject({ status: "ready", fields: { relationship: undefined } });
+    expect(validateRelatedPersonCreate({ ...intent, fields: { ...intent.fields, relationship: "mother-in-law" } }, "Please add my mother-in-law, Mark Murphy, mark@example.test, +353831112233."))
+      .toMatchObject({ status: "ready", fields: { relationship: "mother-in-law" } });
   });
 });
 
@@ -206,9 +224,15 @@ describe("validateCallAppointmentCreate", () => {
   });
 
   it("sanitizes a supplied phone and reason", () => {
-    expect(validateCallAppointmentCreate({ intent: { ...intent, fields: { ...intent.fields, phone: " +353831112233 ", reason: " Discuss my account\n " } },
+    expect(validateCallAppointmentCreate({ intent: { ...intent, fields: { ...intent.fields, phone: " +353831112233 ", reason: " about Discuss my account\n " } },
       accountPhone: "+353831234567", nowIso: "2026-07-16T15:00:00Z", rawMessage: "Book a call next Tuesday at 10am" }))
       .toMatchObject({ status: "ready", fields: { phone: "+353831112233", reason: "Discuss my account" } });
+  });
+
+  it("does not remove a non-conversational use of the word about from the call reason", () => {
+    expect(validateCallAppointmentCreate({ intent: { ...intent, fields: { ...intent.fields, reason: "aboutabout payment" } },
+      accountPhone: "+353831234567", nowIso: "2026-07-16T15:00:00Z", rawMessage: "Book a call next Tuesday at 10am" }))
+      .toMatchObject({ status: "ready", fields: { reason: "aboutabout payment" } });
   });
 
   it.each([

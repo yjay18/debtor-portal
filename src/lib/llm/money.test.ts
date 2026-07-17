@@ -30,6 +30,7 @@ describe("normalizeMoney", () => {
     ["500 EUR", "EUR", 50_000],
     ["500 quid", "EUR", 50_000],
     ["500 euro today", "EUR", 50_000],
+    ["€5.25 now.", "EUR", 525],
     ["$200", "USD", 20_000],
   ])("accepts %s for a %s account", (amountRaw, currency, amountCents) => {
     expect(normalizeMoney(amountRaw, currency)).toEqual({
@@ -51,6 +52,13 @@ describe("normalizeMoney", () => {
 
   it("clarifies an unknown currency word", () => {
     expect(normalizeMoney("200 credits", "EUR")).toMatchObject({
+      status: "clarify",
+      reason: "unknown_currency",
+    });
+  });
+
+  it("fails closed when more than one currency symbol is supplied", () => {
+    expect(normalizeMoney("$€5", "EUR")).toMatchObject({
       status: "clarify",
       reason: "unknown_currency",
     });

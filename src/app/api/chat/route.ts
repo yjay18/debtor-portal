@@ -113,6 +113,7 @@ export async function routeLoadedIntent(input: {
   intent: ParsedIntent;
   nowIso: string;
   rawMessage: string;
+  relatedPersonRawMessage?: string;
   idempotencyKey: string;
   repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson" | "addPromiseToPay" | "recordPayment" | "addCallAppointment">;
 }): Promise<ChatActionResult> {
@@ -138,6 +139,7 @@ export async function routeLoadedIntent(input: {
       accountId: input.accountId,
       account: input.account,
       intent: input.intent,
+      rawMessage: input.relatedPersonRawMessage,
       repo: input.repo,
     });
   }
@@ -304,8 +306,11 @@ export async function executeReadChatTurn(
     const answer = confirmationAnswer(request.message);
     if (answer === "yes") {
       const intent = queuedIntentToParsed(pendingRemoval.intent);
+      const queuedRawMessage = [...loaded.history].reverse().find(({ role }) => role === "account_holder")?.content
+        ?? request.message;
       result = await routeLoadedIntent({ accountId: request.accountId, account: loaded.account, intent,
-        nowIso: loaded.nowIso, rawMessage: request.message, idempotencyKey: request.idempotencyKey, repo: deps.repo });
+        nowIso: loaded.nowIso, rawMessage: queuedRawMessage, relatedPersonRawMessage: queuedRawMessage,
+        idempotencyKey: request.idempotencyKey, repo: deps.repo });
       const [next, ...queuedIntents] = loaded.conversation.dialogState.queuedIntents;
       await deps.conversations.updateDialogState(loaded.conversation, result.success && next
         ? { queuedIntents, awaitingConfirmation: { kind: "next_intent", intent: next } }
@@ -328,6 +333,7 @@ export async function executeReadChatTurn(
       intent,
       nowIso: loaded.nowIso,
       rawMessage: request.message,
+      relatedPersonRawMessage: loaded.conversation.dialogState.pendingAction ? undefined : request.message,
       idempotencyKey: request.idempotencyKey,
       repo: deps.repo,
     });

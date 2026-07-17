@@ -48,6 +48,30 @@ const relatedPersonCreateSchema = z.object({
   authorizedToAct: z.boolean().optional(),
 }).strict();
 
+function statedRelationship(relationship: string | undefined, rawMessage?: string): string | undefined {
+  if (!relationship) return undefined;
+
+  const normalizedRelationship = sanitizeFreeText(relationship);
+  const comparableRelationship = normalizedRelationship
+    .toLocaleLowerCase("en")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+  if (/^(?:undefined|unknown|null|not specified|(?:someone )?authori[sz]ed(?: to (?:act|speak)(?: for me)?)?|acts? for me)$/u.test(comparableRelationship)) {
+    return undefined;
+  }
+  if (!rawMessage) return normalizedRelationship;
+
+  const comparableMessage = sanitizeFreeText(rawMessage)
+    .toLocaleLowerCase("en")
+    .replace(/[^\p{L}\p{N}]+/gu, " ");
+  return comparableMessage.includes(` ${comparableRelationship} `)
+    || comparableMessage.startsWith(`${comparableRelationship} `)
+    || comparableMessage.endsWith(` ${comparableRelationship}`)
+    || comparableMessage === comparableRelationship
+    ? normalizedRelationship
+    : undefined;
+}
+
 const relatedPersonUpdateSchema = z.object({
   selector: sanitizedText(100),
   name: sanitizedText(100).optional(),
@@ -174,8 +198,12 @@ export function validatePreferredContactMethodUpdate(
 //validation for adding a related person, checks for required fields and generates clarification questions if any are missing
 export function validateRelatedPersonCreate(
   intent: RelatedPersonCreateIntent,
+  rawMessage?: string,
 ): RelatedPersonCreateValidation {
-  const result = relatedPersonCreateSchema.safeParse(intent.fields);
+  const result = relatedPersonCreateSchema.safeParse({
+    ...intent.fields,
+    relationship: statedRelationship(intent.fields.relationship, rawMessage),
+  });
   if (result.success) {
     return {
       status: "ready",
@@ -307,7 +335,10 @@ export function validateCallAppointmentCreate(input: {
     return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
       missingFields: ["dateTime"], clarificationQuestion: date.question } };
   }
-  const details = callAppointmentDetailsSchema.safeParse({ phone: input.intent.fields.phone ?? input.accountPhone, reason: input.intent.fields.reason });
+  const details = callAppointmentDetailsSchema.safeParse({
+    phone: input.intent.fields.phone ?? input.accountPhone,
+    reason: input.intent.fields.reason?.replace(/^\s*about\s+/iu, ""),
+  });
   if (!details.success) {
     const field = String(details.error.issues[0]?.path[0] ?? "phone");
     return { status: "clarify", intent: { action: "clarify", fields: {}, additionalIntents: input.intent.additionalIntents,
