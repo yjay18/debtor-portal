@@ -351,7 +351,7 @@ export async function routeReadAction(input: {
     return {
       action: "unsupported",
       success: false,
-      reply: "I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.",
+      reply: "Sorry, I can't do that. I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.",
     };
   }
 
@@ -366,6 +366,10 @@ export async function routeReadAction(input: {
 
   switch (intent.action) {
     case "read_account":
+      if (intent.fields.topic === "balance") {
+        return { action: intent.action, success: true,
+          reply: `Your current balance is ${new Intl.NumberFormat("en-IE", { style: "currency", currency: account.account.currency }).format(account.account.balanceCents / 100)}.` };
+      }
       return { action: intent.action, success: true, reply: "Here are your current account details.", account };
     case "read_preferred_contact_method":
       return {

@@ -146,6 +146,23 @@ describe("confirmed multi-intent queue", () => {
     expect(updateDialogState).toHaveBeenCalledWith(conversation, { queuedIntents: [] });
   });
 
+  it("keeps a queued request pending when the customer asks for something else", async () => {
+    const updateDialogState = vi.fn();
+    const conversation = { ...baseConversation, dialogState: { queuedIntents: [], awaitingConfirmation: {
+      kind: "next_intent" as const, intent: { action: "read_transactions" as const, fields: {} },
+    } } };
+    const parse = vi.fn();
+    const result = await executeReadChatTurn({ accountId, message: "What is my preferred contact method?", idempotencyKey: "00000000-0000-4000-8000-000000000008" }, {
+      conversations: { loadOrCreate: vi.fn().mockResolvedValue(conversation), loadMessages: vi.fn().mockResolvedValue([]),
+        addMessage: vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({ id: "message-2", content: "Clarify", createdAt: nowIso }), updateDialogState },
+      repo, now: () => nowIso, processNotifications: vi.fn(), parse,
+    });
+
+    expect(parse).not.toHaveBeenCalled();
+    expect(result.result.reply).toBe("Sorry, I can't do that while a queued request is waiting. Reply yes to continue or no to skip it. I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.");
+    expect(updateDialogState).not.toHaveBeenCalled();
+  });
+
   it("uses the original request to validate a confirmed queued promise", async () => {
     const promise = { id: "promise-002", amountCents: 50000, currency: "EUR", dueDate: "2026-08-01", status: "active" as const, createdAt: nowIso };
     const addPromiseToPay = vi.fn().mockResolvedValue(promise);

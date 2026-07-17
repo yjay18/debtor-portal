@@ -78,6 +78,14 @@ describe("buildParserMessages", () => {
 });
 
 describe("parseMessage", () => {
+  it("returns a balance-only read without asking the model to infer extra intents", async () => {
+    const completeJson = vi.fn();
+
+    await expect(parseMessage({ ...input, message: "What is my current account balance?" }, fakeClient(completeJson)))
+      .resolves.toEqual({ action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] });
+    expect(completeJson).not.toHaveBeenCalled();
+  });
+
   it("passes the strict schema and returns locally validated output", async () => {
     const completeJson = vi.fn().mockResolvedValue(validProviderIntent);
 

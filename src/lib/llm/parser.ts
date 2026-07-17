@@ -107,6 +107,14 @@ function safeClarification(): ParsedIntent {
   };
 }
 
+function balanceOnlyIntent(message: string): ParsedIntent | undefined {
+  const normalized = message.toLocaleLowerCase("en");
+  if (!/\bbalance\b/u.test(normalized)
+    || /\b(?:pay|payment|clear|settle|transaction|promise|call|contact|people)\b/u.test(normalized)
+    || !/\b(?:what|show|tell|how much|current)\b/u.test(normalized)) return undefined;
+  return { action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] };
+}
+
 function isInvalidOutput(error: unknown): boolean {
   return error instanceof ZodError
     || (error instanceof LlmClientError && error.kind === "invalid_output");
@@ -117,6 +125,8 @@ export async function parseMessage(
   input: ParserInput,
   client?: JsonCompleter,
 ): Promise<ParsedIntent> {
+  const directIntent = balanceOnlyIntent(input.message);
+  if (directIntent) return directIntent;
   const messages = buildParserMessages(input);
   const schema = { name: "account_self_service_intent", schema: parsedIntentJsonSchema };
   let completer = client;

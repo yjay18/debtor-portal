@@ -79,6 +79,22 @@ describe("isReadIntent", () => {
   });
 });
 
+describe("routeReadAction", () => {
+  it("returns only a formatted balance for the balance topic", async () => {
+    const result = await routeReadAction({ accountId: "acc_standard_001",
+      intent: { action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] }, repo: createRepo(), nowIso });
+
+    expect(result).toEqual({ action: "read_account", success: true, reply: "Your current balance is €1,285.00." });
+  });
+
+  it("prefixes unsupported requests with an explicit apology", async () => {
+    const result = await routeReadAction({ accountId: "acc_standard_001",
+      intent: { action: "unsupported", fields: {}, additionalIntents: [], missingFields: [] }, repo: createRepo(), nowIso });
+
+    expect(result.reply).toMatch(/^Sorry, I can't do that\./u);
+  });
+});
+
 describe("routeAccountHolderUpdate", () => {
   it("validates, writes, and returns the persisted account holder", async () => {
     const updated = { ...account.account, phone: "+353831112233" };

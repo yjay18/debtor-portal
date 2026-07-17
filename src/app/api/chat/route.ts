@@ -196,6 +196,8 @@ function confirmationAnswer(message: string) {
   return undefined;
 }
 
+const supportTopics = "I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.";
+
 function removalConfirmationPerson(result: ChatActionResult): RelatedPerson | undefined {
   return result.action === "remove_related_person" && !result.success && result.relatedPeople?.length === 1
     ? result.relatedPeople[0]
@@ -300,7 +302,7 @@ export async function executeReadChatTurn(
       result = { action: "remove_related_person", success: false, reply: `Removal of ${pendingRemoval.personName} was cancelled.` };
       await deps.conversations.updateDialogState(loaded.conversation, withoutConfirmation(loaded.conversation));
     } else {
-      result = { action: "clarify", success: false, reply: `Please reply yes to remove ${pendingRemoval.personName}, or no to cancel.` };
+      result = { action: "clarify", success: false, reply: `Sorry, I can't do that while removal of ${pendingRemoval.personName} is waiting. Reply yes to remove them or no to cancel. ${supportTopics}` };
     }
   } else if (pendingRemoval?.kind === "next_intent") {
     const answer = confirmationAnswer(request.message);
@@ -323,7 +325,7 @@ export async function executeReadChatTurn(
       result = { action: pendingRemoval.intent.action, success: false, reply: "That queued request was skipped." };
       await deps.conversations.updateDialogState(loaded.conversation, { queuedIntents: [] });
     } else {
-      result = { action: "clarify", success: false, reply: "Please reply yes to continue with the queued request, or no to skip it." };
+      result = { action: "clarify", success: false, reply: `Sorry, I can't do that while a queued request is waiting. Reply yes to continue or no to skip it. ${supportTopics}` };
     }
   } else {
     const intent = mergePendingFields(parseProviderIntent(await deps.parse(loaded.parserInput)), loaded.conversation);
