@@ -113,7 +113,7 @@ describe("confirmed multi-intent queue", () => {
         additionalIntents: [{ action: "read_transactions", fields: {} }], missingFields: [] }),
     });
 
-    expect(first.result.reply).toContain("Reply yes to continue");
+    expect(first.result.reply).toContain("request to view transactions");
     expect(updateDialogState).toHaveBeenCalledWith(conversation, { queuedIntents: [],
       awaitingConfirmation: { kind: "next_intent", intent: { action: "read_transactions", fields: {} } } });
 
@@ -142,7 +142,7 @@ describe("confirmed multi-intent queue", () => {
       repo, now: () => nowIso, processNotifications: vi.fn(), parse: vi.fn(),
     });
 
-    expect(result.result.reply).toBe("That queued request was skipped.");
+    expect(result.result.reply).toBe("Your queued request to view transactions was skipped.");
     expect(updateDialogState).toHaveBeenCalledWith(conversation, { queuedIntents: [] });
   });
 
@@ -159,7 +159,7 @@ describe("confirmed multi-intent queue", () => {
     });
 
     expect(parse).not.toHaveBeenCalled();
-    expect(result.result.reply).toBe("Sorry, I can't do that while a queued request is waiting. Reply yes to continue or no to skip it. I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.");
+    expect(result.result.reply).toBe("Sorry, I can't do that while your queued request to view transactions is waiting. Reply yes to continue or no to skip it. I can help with account details, contact preferences, related people, promises, transactions, payments, and call appointments.");
     expect(updateDialogState).not.toHaveBeenCalled();
   });
 

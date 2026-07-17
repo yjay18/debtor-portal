@@ -115,6 +115,13 @@ function balanceOnlyIntent(message: string): ParsedIntent | undefined {
   return { action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] };
 }
 
+function unsupportedDirectBalanceEditIntent(message: string): ParsedIntent | undefined {
+  const normalized = message.toLocaleLowerCase("en");
+  if (!/\b(?:change|set|adjust)\b[\s\S]{0,40}\bbalance\b/u.test(normalized)
+    && !/\b(?:ignore|disregard|override)\b[\s\S]{0,80}\b(?:previous|prior|system|instructions?)\b/u.test(normalized)) return undefined;
+  return { action: "unsupported", fields: {}, additionalIntents: [], missingFields: [] };
+}
+
 function isInvalidOutput(error: unknown): boolean {
   return error instanceof ZodError
     || (error instanceof LlmClientError && error.kind === "invalid_output");
@@ -125,6 +132,8 @@ export async function parseMessage(
   input: ParserInput,
   client?: JsonCompleter,
 ): Promise<ParsedIntent> {
+  const unsupportedIntent = unsupportedDirectBalanceEditIntent(input.message);
+  if (unsupportedIntent) return unsupportedIntent;
   const directIntent = balanceOnlyIntent(input.message);
   if (directIntent) return directIntent;
   const messages = buildParserMessages(input);

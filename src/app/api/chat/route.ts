@@ -215,6 +215,20 @@ function queuedIntentToParsed(intent: { action: ChatActionResult["action"]; fiel
   return parseProviderIntent({ ...intent, additionalIntents: [], missingFields: [] });
 }
 
+function queuedIntentDescription(intent: { action: ChatActionResult["action"]; fields?: Record<string, unknown> }) {
+  if (intent.action === "read_account" && intent.fields?.topic === "balance") return "view your account balance";
+  return ({
+    read_account: "view your account details", update_account_holder: "update your account details",
+    read_preferred_contact_method: "view your preferred contact method", update_preferred_contact_method: "update your preferred contact method",
+    add_related_person: "add a related person", update_related_person: "update a related person",
+    remove_related_person: "remove a related person", read_related_people: "view related people",
+    create_promise_to_pay: "create a promise to pay", read_promises_to_pay: "view promises to pay",
+    mock_payment: "make a payment", read_transactions: "view transactions",
+    book_call_appointment: "book a call appointment", read_call_appointments: "view call appointments",
+    clarify: "continue with a clarification", unsupported: "continue with the request",
+  } satisfies Record<ChatActionResult["action"], string>)[intent.action];
+}
+
 function mergePendingFields(intent: ParsedIntent, conversation: Conversation): ParsedIntent {
   const pending = conversation.dialogState.pendingAction;
   return pending && pending.action === intent.action
@@ -225,7 +239,7 @@ function mergePendingFields(intent: ParsedIntent, conversation: Conversation): P
 function nextIntentPrompt(result: ChatActionResult, intent: { action: ChatActionResult["action"] }): ChatActionResult {
   return {
     ...result,
-    reply: `${result.reply} I also found a ${intent.action.replaceAll("_", " ")} request. Reply yes to continue or no to skip it.`,
+    reply: `${result.reply} I also found a request to ${queuedIntentDescription(intent)}. Reply yes to continue or no to skip it.`,
   };
 }
 //persists the result of a read turn using an assistant message to store metadata
@@ -322,10 +336,10 @@ export async function executeReadChatTurn(
               : {}) });
       if (result.success && next) result = nextIntentPrompt(result, next);
     } else if (answer === "no") {
-      result = { action: pendingRemoval.intent.action, success: false, reply: "That queued request was skipped." };
+      result = { action: pendingRemoval.intent.action, success: false, reply: `Your queued request to ${queuedIntentDescription(pendingRemoval.intent)} was skipped.` };
       await deps.conversations.updateDialogState(loaded.conversation, { queuedIntents: [] });
     } else {
-      result = { action: "clarify", success: false, reply: `Sorry, I can't do that while a queued request is waiting. Reply yes to continue or no to skip it. ${supportTopics}` };
+      result = { action: "clarify", success: false, reply: `Sorry, I can't do that while your queued request to ${queuedIntentDescription(pendingRemoval.intent)} is waiting. Reply yes to continue or no to skip it. ${supportTopics}` };
     }
   } else {
     const intent = mergePendingFields(parseProviderIntent(await deps.parse(loaded.parserInput)), loaded.conversation);
