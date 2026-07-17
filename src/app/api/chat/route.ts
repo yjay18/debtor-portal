@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { SupabaseAccountRepo, type AccountRepo } from "@/lib/account/repo";
-import type { AccountContext } from "@/lib/account/types";
+import type { AccountContext, RelatedPerson } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
-import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction, routeRelatedPersonCreate } from "@/lib/chat/router";
+import { isReadIntent, routeAccountHolderUpdate, routePreferredContactMethodUpdate, routeReadAction, routeRelatedPersonCreate, routeRelatedPersonRemovalConfirmed, routeRelatedPersonRemovalRequest, routeRelatedPersonUpdate } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -51,8 +51,8 @@ type ReadTurnLoaders = {
 };
 
 type ReadTurnDependencies = Omit<ReadTurnLoaders, "conversations" | "repo"> & {
-  conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage">;
-  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder" | "addRelatedPerson">;
+  conversations: Pick<ConversationStore, "loadOrCreate" | "loadMessages" | "addMessage" | "updateDialogState">;
+  repo: Pick<AccountRepo, "getAccountContextByAccountId" | "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson" | "deleteRelatedPerson">;
   parse: (input: ParserInput) => Promise<ParsedIntent>;
   processNotifications: (accountHolderId: string) => ReturnType<typeof processQueuedNotifications>;
 };
@@ -109,7 +109,7 @@ export async function routeLoadedIntent(input: {
   account: AccountContext;
   intent: ParsedIntent;
   nowIso: string;
-  repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson">;
+  repo: Pick<AccountRepo, "updateAccountHolder" | "addRelatedPerson" | "updateRelatedPerson">;
 }): Promise<ChatActionResult> {
   if (input.intent.action === "update_account_holder") {
     return routeAccountHolderUpdate({
@@ -136,13 +136,49 @@ export async function routeLoadedIntent(input: {
       repo: input.repo,
     });
   }
+  if (input.intent.action === "update_related_person") {
+    return routeRelatedPersonUpdate({
+      accountId: input.accountId,
+      account: input.account,
+      intent: input.intent,
+      repo: input.repo,
+    });
+  }
+  if (input.intent.action === "remove_related_person") {
+    return routeRelatedPersonRemovalRequest({
+      account: input.account,
+      intent: input.intent,
+    });
+  }
   return routeLoadedReadIntent(input);
 }
-
+//only one related person can be removed at a time and we ask for confirmation
 function isPersistedMutation(action: ChatActionResult["action"]) {
   return action === "update_account_holder"
     || action === "update_preferred_contact_method"
-    || action === "add_related_person";
+    || action === "add_related_person"
+    || action === "update_related_person"
+    || action === "remove_related_person";
+}
+
+function confirmationAnswer(message: string) {
+  const normalized = message.trim().toLocaleLowerCase("en");
+  if (["yes", "y", "confirm", "go ahead"].includes(normalized)) return "yes";
+  if (["no", "n", "cancel"].includes(normalized)) return "no";
+  return undefined;
+}
+
+function removalConfirmationPerson(result: ChatActionResult): RelatedPerson | undefined {
+  return result.action === "remove_related_person" && !result.success && result.relatedPeople?.length === 1
+    ? result.relatedPeople[0]
+    : undefined;
+}
+
+function withoutConfirmation(conversation: Conversation) {
+  return {
+    ...(conversation.dialogState.pendingAction ? { pendingAction: conversation.dialogState.pendingAction } : {}),
+    queuedIntents: conversation.dialogState.queuedIntents,
+  };
 }
 //persists the result of a read turn using an assistant message to store metadata
 // this makes it three actions 
@@ -198,14 +234,46 @@ export async function executeReadChatTurn(
     role: "account_holder",
     content: request.message,
   });
-  const intent = await deps.parse(loaded.parserInput);
-  const result = await routeLoadedIntent({
-    accountId: request.accountId,
-    account: loaded.account,
-    intent,
-    nowIso: loaded.nowIso,
-    repo: deps.repo,
-  });
+  //confirmation for removal
+  const pendingRemoval = loaded.conversation.dialogState.awaitingConfirmation;
+  let result: ChatActionResult;
+  if (pendingRemoval?.kind === "remove_related_person") {
+    const answer = confirmationAnswer(request.message);
+    if (answer === "yes") {
+      result = await routeRelatedPersonRemovalConfirmed({
+        accountId: request.accountId,
+        account: loaded.account,
+        personId: pendingRemoval.personId,
+        repo: deps.repo,
+      });
+      await deps.conversations.updateDialogState(loaded.conversation, withoutConfirmation(loaded.conversation));
+    } else if (answer === "no") {
+      result = { action: "remove_related_person", success: false, reply: `Removal of ${pendingRemoval.personName} was cancelled.` };
+      await deps.conversations.updateDialogState(loaded.conversation, withoutConfirmation(loaded.conversation));
+    } else {
+      result = { action: "clarify", success: false, reply: `Please reply yes to remove ${pendingRemoval.personName}, or no to cancel.` };
+    }
+  } else {
+    const intent = await deps.parse(loaded.parserInput);
+    result = await routeLoadedIntent({
+      accountId: request.accountId,
+      account: loaded.account,
+      intent,
+      nowIso: loaded.nowIso,
+      repo: deps.repo,
+    });
+    const person = removalConfirmationPerson(result);
+    if (person) {
+      await deps.conversations.updateDialogState(loaded.conversation, {
+        ...loaded.conversation.dialogState,
+        awaitingConfirmation: {
+          kind: "remove_related_person",
+          personId: person.id,
+          personName: person.name,
+        },
+      });
+    }
+  }
   //we process after database commit
   let notificationStatus: NotificationBatchStatus | "queued" | undefined;
   if (isPersistedMutation(result.action) && result.success && result.notificationQueued) {

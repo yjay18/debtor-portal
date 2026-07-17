@@ -2,7 +2,7 @@ import { expect, it } from "vitest";
 
 import standardFixture from "../../../fixtures/debtor-standard.json";
 import { normalizeLegacyFixture } from "@/lib/account/types";
-import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, previewAccountHolderUpdate } from "./change-summary";
+import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "./change-summary";
 
 const holder = normalizeLegacyFixture(standardFixture).account;
 
@@ -33,5 +33,23 @@ it("builds a created related-person summary without before values", () => {
   const summary = buildRelatedPersonCreateSummary({ id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false });
   expect(summary).toEqual([{ kind: "created", entity: "related_person", label: "Mark Murphy", fields: [
     { field: "Email", after: "mark@example.test" }, { field: "Phone", after: "+353831112233" }, { field: "Authorized to act", after: "No" },
+  ] }]);
+});
+//building a related person update summary 
+it("builds only changed related-person fields", () => {
+  const before = { id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false };
+  const fields = { email: "new@example.test", authorizedToAct: true };
+  expect(buildRelatedPersonUpdateSummary(before, previewRelatedPersonUpdate(before, fields), fields)).toEqual([{
+    kind: "updated", entity: "related_person", label: "Mark Murphy", fields: [
+      { field: "Email", before: "mark@example.test", after: "new@example.test" },
+      { field: "Authorized to act", before: "No", after: "Yes" },
+    ],
+  }]);
+});
+
+it("builds a removed related-person summary without after values", () => {
+  const summary = buildRelatedPersonRemoveSummary({ id: "person-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false });
+  expect(summary).toEqual([{ kind: "removed", entity: "related_person", label: "Mark Murphy", fields: [
+    { field: "Email", before: "mark@example.test" }, { field: "Phone", before: "+353831112233" }, { field: "Authorized to act", before: "No" },
   ] }]);
 });

@@ -2,11 +2,14 @@ import { z } from "zod";
 
 import type { AccountHolderUpdate } from "@/lib/account/repo";
 import type { RelatedPersonCreate } from "@/lib/account/repo";
+import type { RelatedPersonUpdate } from "@/lib/account/repo";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
 type RelatedPersonCreateIntent = Extract<ParsedIntent, { action: "add_related_person" }>;
+type RelatedPersonUpdateIntent = Extract<ParsedIntent, { action: "update_related_person" }>;
+type RelatedPersonRemoveIntent = Extract<ParsedIntent, { action: "remove_related_person" }>;
 //normalizing
 export function sanitizeFreeText(value: string): string {
   return value.normalize("NFC").replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim();
@@ -40,6 +43,21 @@ const relatedPersonCreateSchema = z.object({
   authorizedToAct: z.boolean().optional(),
 }).strict();
 
+const relatedPersonUpdateSchema = z.object({
+  selector: sanitizedText(100),
+  name: sanitizedText(100).optional(),
+  email: sanitizedText(254).pipe(z.email()).optional(),
+  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)).optional(),
+  relationship: sanitizedText(100).optional(),
+  authorizedToAct: z.boolean().optional(),
+}).strict().refine((fields) => Object.entries(fields).some(([key, value]) => key !== "selector" && value !== undefined), {
+  message: "At least one related-person field is required.",
+});
+
+const relatedPersonRemoveSchema = z.object({
+  selector: sanitizedText(100),
+}).strict();
+
 export type ValidatedAccountUpdateFields = z.infer<typeof updateAccountFieldsSchema>
   & AccountHolderUpdate;
 
@@ -60,6 +78,14 @@ export type PreferredContactMethodValidation =
 
 export type RelatedPersonCreateValidation =
   | { status: "ready"; fields: RelatedPersonCreate }
+  | { status: "clarify"; intent: ParsedIntent };
+
+export type RelatedPersonUpdateValidation =
+  | { status: "ready"; selector: string; fields: RelatedPersonUpdate }
+  | { status: "clarify"; intent: ParsedIntent };
+
+export type RelatedPersonRemoveValidation =
+  | { status: "ready"; selector: string }
   | { status: "clarify"; intent: ParsedIntent };
 
 const fieldLabels: Record<string, string> = {
@@ -146,6 +172,52 @@ export function validateRelatedPersonCreate(
       additionalIntents: intent.additionalIntents,
       missingFields,
       clarificationQuestion: `To add someone, what is ${label}?`,
+    },
+  };
+}
+
+export function validateRelatedPersonUpdate(
+  intent: RelatedPersonUpdateIntent,
+): RelatedPersonUpdateValidation {
+  const result = relatedPersonUpdateSchema.safeParse(intent.fields);
+  if (result.success) {
+    const { selector, ...fields } = result.data;
+    return { status: "ready", selector, fields };
+  }
+
+  const missingFields = [...new Set(result.error.issues.map((issue) => String(issue.path[0] ?? "relatedPerson")))];
+  const firstField = missingFields[0];
+  const question = firstField === "selector"
+    ? "Which related person should I update?"
+    : firstField === "relatedPerson"
+      ? "What detail should I update for that related person?"
+      : `What ${fieldLabels[firstField] ?? "related-person detail"} should I use?`;
+  return {
+    status: "clarify",
+    intent: {
+      action: "clarify",
+      fields: {},
+      additionalIntents: intent.additionalIntents,
+      missingFields,
+      clarificationQuestion: question,
+    },
+  };
+}
+
+export function validateRelatedPersonRemove(
+  intent: RelatedPersonRemoveIntent,
+): RelatedPersonRemoveValidation {
+  const result = relatedPersonRemoveSchema.safeParse(intent.fields);
+  if (result.success) return { status: "ready", selector: result.data.selector };
+
+  return {
+    status: "clarify",
+    intent: {
+      action: "clarify",
+      fields: {},
+      additionalIntents: intent.additionalIntents,
+      missingFields: ["selector"],
+      clarificationQuestion: "Which related person should I remove?",
     },
   };
 }

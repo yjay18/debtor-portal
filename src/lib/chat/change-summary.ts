@@ -1,6 +1,6 @@
 import type { AccountHolder } from "@/lib/account/types";
 import type { RelatedPerson } from "@/lib/account/types";
-import type { AccountHolderUpdate } from "@/lib/account/repo";
+import type { AccountHolderUpdate, RelatedPersonUpdate } from "@/lib/account/repo";
 import type { ChangeSummary } from "./types";
 
 export function buildUpdateSummary(input: {
@@ -31,6 +31,41 @@ export function buildRelatedPersonCreateSummary(person: RelatedPerson): ChangeSu
       { field: "Authorized to act", after: person.authorizedToAct ? "Yes" : "No" },
     ],
   });
+}
+
+export function previewRelatedPersonUpdate(person: RelatedPerson, fields: RelatedPersonUpdate): RelatedPerson {
+  return { ...person, ...fields };
+}
+
+export function buildRelatedPersonUpdateSummary(
+  before: RelatedPerson,
+  after: RelatedPerson,
+  touched: RelatedPersonUpdate,
+) {
+  const candidates = [
+    ["name", "Name", before.name, after.name],
+    ["email", "Email", before.email, after.email],
+    ["phone", "Phone", before.phone, after.phone],
+    ["relationship", "Relationship", before.relationship ?? "Not set", after.relationship ?? "Not set"],
+    ["authorizedToAct", "Authorized to act", before.authorizedToAct ? "Yes" : "No", after.authorizedToAct ? "Yes" : "No"],
+  ] as const;
+  return buildUpdateSummary({ entity: "related_person", label: after.name,
+    fields: candidates.filter(([key]) => touched[key] !== undefined)
+      .map(([, field, oldValue, newValue]) => ({ field, before: oldValue, after: newValue })) });
+}
+
+export function buildRelatedPersonRemoveSummary(person: RelatedPerson): ChangeSummary[] {
+  return [{
+    kind: "removed",
+    entity: "related_person",
+    label: person.name,
+    fields: [
+      { field: "Email", before: person.email },
+      { field: "Phone", before: person.phone },
+      ...(person.relationship ? [{ field: "Relationship", before: person.relationship }] : []),
+      { field: "Authorized to act", before: person.authorizedToAct ? "Yes" : "No" },
+    ],
+  }];
 }
 
 export function previewAccountHolderUpdate(holder: AccountHolder, fields: AccountHolderUpdate): AccountHolder {

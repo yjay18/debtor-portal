@@ -1,8 +1,9 @@
 import type { AccountRepo } from "@/lib/account/repo";
-import type { AccountContext, CallAppointment } from "@/lib/account/types";
+import type { AccountContext, CallAppointment, RelatedPerson } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
-import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, previewAccountHolderUpdate } from "@/lib/chat/change-summary";
-import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate } from "@/lib/chat/validation";
+import { buildAccountHolderUpdateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "@/lib/chat/change-summary";
+import { resolveRelatedPerson } from "@/lib/chat/disambiguate";
+import { validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
 //actions supported by the read only route
 export type ReadAction =
@@ -21,6 +22,8 @@ export type ReadIntent = Extract<
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 type PreferredContactMethodUpdateIntent = Extract<ParsedIntent, { action: "update_preferred_contact_method" }>;
 type RelatedPersonCreateIntent = Extract<ParsedIntent, { action: "add_related_person" }>;
+type RelatedPersonUpdateIntent = Extract<ParsedIntent, { action: "update_related_person" }>;
+type RelatedPersonRemoveIntent = Extract<ParsedIntent, { action: "remove_related_person" }>;
 //from routing
 const readIntentActions = new Set<ParsedIntent["action"]>([
   "read_account",
@@ -118,6 +121,94 @@ export async function routeRelatedPersonCreate(input: {
     relatedPeople: [created],
     notificationQueued: true,
     changeSummary: buildRelatedPersonCreateSummary(created),
+  };
+}
+//we refresh the account context in UI after updating related person for instant feedback
+export async function routeRelatedPersonUpdate(input: {
+  accountId: string;
+  account: AccountContext;
+  intent: RelatedPersonUpdateIntent;
+  repo: Pick<AccountRepo, "updateRelatedPerson">;
+  resolve?: (input: { selector: string; people: RelatedPerson[] }) => ReturnType<typeof resolveRelatedPerson>;
+}): Promise<ChatActionResult> {
+  const validation = validateRelatedPersonUpdate(input.intent);
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "Which related person should I update?", missingFields: validation.intent.missingFields };
+  }
+
+  const resolution = await (input.resolve ?? resolveRelatedPerson)({
+    selector: validation.selector,
+    people: input.account.relatedPeople,
+  });
+  if (resolution.status === "ambiguous") {
+    return { action: "clarify", success: false, reply: "I found more than one matching related person. Please provide their full name.", missingFields: ["selector"] };
+  }
+  if (resolution.status === "not_found") {
+    return { action: "clarify", success: false, reply: "I couldn't identify that related person. Please provide their full name.", missingFields: ["selector"] };
+  }
+
+  const before = resolution.person;
+  const preview = previewRelatedPersonUpdate(before, validation.fields);
+  if (buildRelatedPersonUpdateSummary(before, preview, validation.fields).length === 0) {
+    return { action: "update_related_person", success: true, reply: `${before.name}'s details are already up to date.`, account: input.account, changeSummary: [] };
+  }
+
+  const updated = await input.repo.updateRelatedPerson(input.accountId, before.id, validation.fields);
+  return {
+    action: "update_related_person",
+    success: true,
+    reply: `${updated.name}'s details were updated.`,
+    account: { ...input.account, relatedPeople: input.account.relatedPeople.map((person) => person.id === updated.id ? updated : person) },
+    relatedPeople: [updated],
+    notificationQueued: true,
+    changeSummary: buildRelatedPersonUpdateSummary(before, updated, validation.fields),
+  };
+}
+
+export async function routeRelatedPersonRemovalRequest(input: {
+  account: AccountContext;
+  intent: RelatedPersonRemoveIntent;
+  resolve?: (input: { selector: string; people: RelatedPerson[] }) => ReturnType<typeof resolveRelatedPerson>;
+}): Promise<ChatActionResult> {
+  const validation = validateRelatedPersonRemove(input.intent);
+  if (validation.status === "clarify") {
+    return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "Which related person should I remove?", missingFields: validation.intent.missingFields };
+  }
+
+  const resolution = await (input.resolve ?? resolveRelatedPerson)({
+    selector: validation.selector,
+    people: input.account.relatedPeople,
+  });
+  if (resolution.status === "ambiguous") {
+    return { action: "clarify", success: false, reply: "I found more than one matching related person. Please provide their full name.", missingFields: ["selector"] };
+  }
+  if (resolution.status === "not_found") {
+    return { action: "clarify", success: false, reply: "I couldn't identify that related person. Please provide their full name.", missingFields: ["selector"] };
+  }
+
+  return {
+    action: "remove_related_person",
+    success: false,
+    reply: `Please confirm that you want to remove ${resolution.person.name}. Reply yes to remove them or no to cancel.`,
+    relatedPeople: [resolution.person],
+  };
+}
+
+export async function routeRelatedPersonRemovalConfirmed(input: {
+  accountId: string;
+  account: AccountContext;
+  personId: string;
+  repo: Pick<AccountRepo, "deleteRelatedPerson">;
+}): Promise<ChatActionResult> {
+  const removed = await input.repo.deleteRelatedPerson(input.accountId, input.personId);
+  return {
+    action: "remove_related_person",
+    success: true,
+    reply: `${removed.name} was removed from your account.`,
+    account: { ...input.account, relatedPeople: input.account.relatedPeople.filter((person) => person.id !== removed.id) },
+    relatedPeople: [removed],
+    notificationQueued: true,
+    changeSummary: buildRelatedPersonRemoveSummary(removed),
   };
 }
 

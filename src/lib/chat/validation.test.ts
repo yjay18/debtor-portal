@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
-import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate } from "./validation";
+import { sanitizeFreeText, validateAccountHolderUpdate, validatePreferredContactMethodUpdate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "./validation";
 
 type AccountUpdateIntent = Extract<ParsedIntent, { action: "update_account_holder" }>;
 
@@ -129,5 +129,31 @@ describe("validateRelatedPersonCreate", () => {
   it("clarifies when a required contact detail is absent", () => {
     expect(validateRelatedPersonCreate({ action: "add_related_person", fields: { name: "Mark", phone: "+353831112233" }, additionalIntents: [], missingFields: [] }))
       .toMatchObject({ status: "clarify", intent: { missingFields: ["email"] } });
+  });
+});
+
+describe("validateRelatedPersonUpdate", () => {
+  it("sanitizes a selector and changed field", () => {
+    expect(validateRelatedPersonUpdate({ action: "update_related_person", fields: { selector: " Mark O'Brien ", phone: " +353831112233 " }, additionalIntents: [], missingFields: [] }))
+      .toEqual({ status: "ready", selector: "Mark O'Brien", fields: { phone: "+353831112233" } });
+  });
+
+  it("clarifies when the selector or changed field is missing", () => {
+    expect(validateRelatedPersonUpdate({ action: "update_related_person", fields: { selector: "Mark" }, additionalIntents: [], missingFields: [] }))
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["relatedPerson"] } });
+    expect(validateRelatedPersonUpdate({ action: "update_related_person", fields: { phone: "+353831112233" }, additionalIntents: [], missingFields: [] }))
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["selector"] } });
+  });
+});
+
+describe("validateRelatedPersonRemove", () => {
+  it("sanitizes the required selector", () => {
+    expect(validateRelatedPersonRemove({ action: "remove_related_person", fields: { selector: " John Murphy\n" }, additionalIntents: [], missingFields: [] }))
+      .toEqual({ status: "ready", selector: "John Murphy" });
+  });
+
+  it("clarifies when the selector is absent", () => {
+    expect(validateRelatedPersonRemove({ action: "remove_related_person", fields: {}, additionalIntents: [], missingFields: [] }))
+      .toMatchObject({ status: "clarify", intent: { missingFields: ["selector"] } });
   });
 });

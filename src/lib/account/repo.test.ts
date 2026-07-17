@@ -8,6 +8,7 @@ import {
   mapPromiseToPayRow,
   mapRelatedPersonRow,
   mapRelatedPersonCreate,
+  mapRelatedPersonUpdate,
   mapTransactionRow,
   SupabaseAccountRepo,
   type AccountHolderRow,
@@ -16,6 +17,7 @@ import {
   type PromiseToPayRow,
   type RelatedPersonRow,
   type RelatedPersonCreate,
+  type RelatedPersonUpdate,
   type TransactionRow,
 } from "./repo";
 //testing important fields with this one
@@ -116,6 +118,11 @@ it("maps a missing optional relationship to undefined", () => {
 it("maps a related-person create payload without database-only fields", () => {
   const fields: RelatedPersonCreate = { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: false };
   expect(mapRelatedPersonCreate(fields)).toEqual({ name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: null, authorized_to_act: false });
+});
+
+it("maps only supplied related-person update fields", () => {
+  const fields: RelatedPersonUpdate = { email: "new@example.test", authorizedToAct: true };
+  expect(mapRelatedPersonUpdate(fields)).toEqual({ email: "new@example.test", authorized_to_act: true });
 });
 
 const promiseRow: PromiseToPayRow = {
@@ -418,12 +425,58 @@ function createRelatedPersonInsertClient(holder: FakeQueryResult, relatedPerson:
   return { client: { from }, from, inserted };
 }
 
+function createRelatedPersonUpdateClient(holder: FakeQueryResult, relatedPerson: FakeQueryResult) {
+  const maybeSingle = vi.fn().mockResolvedValue(relatedPerson);
+  const select = vi.fn(() => ({ maybeSingle }));
+  const holderEq = vi.fn(() => ({ select }));
+  const personEq = vi.fn(() => ({ eq: holderEq }));
+  const update = vi.fn(() => ({ eq: personEq }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(holder) }) }) }
+    : { update });
+  return { client: { from }, update, personEq, holderEq, select };
+}
+
+function createRelatedPersonDeleteClient(holder: FakeQueryResult, relatedPerson: FakeQueryResult) {
+  const maybeSingle = vi.fn().mockResolvedValue(relatedPerson);
+  const select = vi.fn(() => ({ maybeSingle }));
+  const holderEq = vi.fn(() => ({ select }));
+  const personEq = vi.fn(() => ({ eq: holderEq }));
+  const remove = vi.fn(() => ({ eq: personEq }));
+  const from = vi.fn((table: string) => table === "account_holders"
+    ? { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve(holder) }) }) }
+    : { delete: remove });
+  return { client: { from }, remove, personEq, holderEq, select };
+}
+
 it("resolves the account holder before inserting a related person", async () => {
   const query = createRelatedPersonInsertClient({ data: { id: "holder-001" }, error: null }, { data: { ...relatedPersonRow, name: "Mark Murphy" }, error: null });
   await expect(new SupabaseAccountRepo(query.client as never).addRelatedPerson("acc_standard_001", { name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", authorizedToAct: true }))
     .resolves.toMatchObject({ id: "person-001", name: "Mark Murphy", authorizedToAct: false });
   expect(query.from).toHaveBeenNthCalledWith(1, "account_holders");
   expect(query.inserted).toHaveBeenCalledWith({ account_holder_id: "holder-001", name: "Mark Murphy", email: "mark@example.test", phone: "+353831112233", relationship: null, authorized_to_act: true });
+});
+
+it("scopes a related-person update to the resolved account holder", async () => {
+  const query = createRelatedPersonUpdateClient({ data: { id: "holder-001" }, error: null }, { data: { ...relatedPersonRow, phone: "+353831112233" }, error: null });
+  const repo = new SupabaseAccountRepo(query.client as never, () => "2026-07-17T09:00:00.000Z");
+
+  await expect(repo.updateRelatedPerson("acc_standard_001", "person-001", { phone: "+353831112233" }))
+    .resolves.toMatchObject({ id: "person-001", phone: "+353831112233" });
+  expect(query.update).toHaveBeenCalledWith({ phone: "+353831112233", updated_at: "2026-07-17T09:00:00.000Z" });
+  expect(query.personEq).toHaveBeenCalledWith("id", "person-001");
+  expect(query.holderEq).toHaveBeenCalledWith("account_holder_id", "holder-001");
+  expect(query.select).toHaveBeenCalledWith("*");
+});
+
+it("scopes a related-person deletion to the resolved account holder", async () => {
+  const query = createRelatedPersonDeleteClient({ data: { id: "holder-001" }, error: null }, { data: relatedPersonRow, error: null });
+  await expect(new SupabaseAccountRepo(query.client as never).deleteRelatedPerson("acc_standard_001", "person-001"))
+    .resolves.toMatchObject({ id: "person-001", name: "John Murphy" });
+  expect(query.remove).toHaveBeenCalledOnce();
+  expect(query.personEq).toHaveBeenCalledWith("id", "person-001");
+  expect(query.holderEq).toHaveBeenCalledWith("account_holder_id", "holder-001");
+  expect(query.select).toHaveBeenCalledWith("*");
 });
 
 it("updates only supplied fields and returns the persisted holder", async () => {

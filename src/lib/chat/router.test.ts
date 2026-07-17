@@ -9,6 +9,9 @@ import {
   routeAccountHolderUpdate,
   routePreferredContactMethodUpdate,
   routeRelatedPersonCreate,
+  routeRelatedPersonRemovalConfirmed,
+  routeRelatedPersonRemovalRequest,
+  routeRelatedPersonUpdate,
   routeReadAction,
   type ReadAction,
   type ReadIntent,
@@ -144,6 +147,58 @@ describe("routeRelatedPersonCreate", () => {
 
     expect(result).toMatchObject({ action: "clarify", success: false, missingFields: expect.arrayContaining(["email", "phone"]) });
     expect(addRelatedPerson).not.toHaveBeenCalled();
+  });
+});
+
+describe("routeRelatedPersonUpdate", () => {
+  it("updates one resolved person and returns the refreshed account state", async () => {
+    const updated = { ...account.relatedPeople[0], phone: "+353831112233" };
+    const updateRelatedPerson = vi.fn().mockResolvedValue(updated);
+    const intent = { action: "update_related_person", fields: { selector: "John", phone: updated.phone }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "update_related_person" }>;
+    const result = await routeRelatedPersonUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateRelatedPerson } });
+
+    expect(updateRelatedPerson).toHaveBeenCalledWith("acc_standard_001", account.relatedPeople[0].id, { phone: updated.phone });
+    expect(result).toMatchObject({ action: "update_related_person", success: true, notificationQueued: true,
+      account: { relatedPeople: [updated] }, relatedPeople: [updated],
+      changeSummary: [{ kind: "updated", entity: "related_person", fields: [{ field: "Phone", before: account.relatedPeople[0].phone, after: updated.phone }] }] });
+  });
+
+  it("does not write when the resolved value is unchanged", async () => {
+    const updateRelatedPerson = vi.fn();
+    const intent = { action: "update_related_person", fields: { selector: "John", phone: account.relatedPeople[0].phone }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "update_related_person" }>;
+    const result = await routeRelatedPersonUpdate({ accountId: "acc_standard_001", account, intent, repo: { updateRelatedPerson } });
+
+    expect(result).toMatchObject({ action: "update_related_person", success: true, changeSummary: [] });
+    expect(updateRelatedPerson).not.toHaveBeenCalled();
+  });
+
+  it("clarifies an ambiguous selector before writing", async () => {
+    const updateRelatedPerson = vi.fn();
+    const ambiguousAccount = { ...account, relatedPeople: [...account.relatedPeople, { ...account.relatedPeople[0], id: "person-duplicate", name: "John Moran" }] };
+    const intent = { action: "update_related_person", fields: { selector: "John", phone: "+353831112233" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "update_related_person" }>;
+    const result = await routeRelatedPersonUpdate({ accountId: "acc_standard_001", account: ambiguousAccount, intent, repo: { updateRelatedPerson } });
+
+    expect(result).toMatchObject({ action: "clarify", success: false, missingFields: ["selector"] });
+    expect(updateRelatedPerson).not.toHaveBeenCalled();
+  });
+});
+
+describe("related-person removal", () => {
+  it("requests explicit confirmation without deleting", async () => {
+    const intent = { action: "remove_related_person", fields: { selector: "John" }, additionalIntents: [], missingFields: [] } as Extract<ParsedIntent, { action: "remove_related_person" }>;
+    const result = await routeRelatedPersonRemovalRequest({ account, intent });
+
+    expect(result).toMatchObject({ action: "remove_related_person", success: false, relatedPeople: [account.relatedPeople[0]] });
+    expect(result.reply).toContain("Reply yes");
+  });
+
+  it("deletes only after confirmation and returns the refreshed account", async () => {
+    const deleteRelatedPerson = vi.fn().mockResolvedValue(account.relatedPeople[0]);
+    const result = await routeRelatedPersonRemovalConfirmed({ accountId: "acc_standard_001", account, personId: account.relatedPeople[0].id, repo: { deleteRelatedPerson } });
+
+    expect(deleteRelatedPerson).toHaveBeenCalledWith("acc_standard_001", account.relatedPeople[0].id);
+    expect(result).toMatchObject({ action: "remove_related_person", success: true, notificationQueued: true,
+      account: { relatedPeople: [] }, changeSummary: [{ kind: "removed", entity: "related_person" }] });
   });
 });
 

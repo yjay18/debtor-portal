@@ -237,6 +237,8 @@ export type RelatedPersonCreate = {
   authorizedToAct: boolean;
 };
 
+export type RelatedPersonUpdate = Partial<RelatedPersonCreate>;
+
 export function mapRelatedPersonCreate(fields: RelatedPersonCreate) {
   return {
     name: fields.name,
@@ -245,6 +247,16 @@ export function mapRelatedPersonCreate(fields: RelatedPersonCreate) {
     relationship: fields.relationship ?? null,
     authorized_to_act: fields.authorizedToAct,
   };
+}
+
+export function mapRelatedPersonUpdate(fields: RelatedPersonUpdate) {
+  return Object.fromEntries([
+    ["name", fields.name],
+    ["email", fields.email],
+    ["phone", fields.phone],
+    ["relationship", fields.relationship],
+    ["authorized_to_act", fields.authorizedToAct],
+  ].filter((entry): entry is [string, string | boolean] => entry[1] !== undefined));
 }
 // to convert from Typescript camelcase to posgres snake case
 //and we remove undefined entries to avoid overwriting and prevent field data leakage
@@ -301,6 +313,15 @@ export interface AccountRepo {
   addRelatedPerson(
     accountId: string,
     fields: RelatedPersonCreate,
+  ): Promise<RelatedPerson>;
+  updateRelatedPerson(
+    accountId: string,
+    personId: string,
+    fields: RelatedPersonUpdate,
+  ): Promise<RelatedPerson>;
+  deleteRelatedPerson(
+    accountId: string,
+    personId: string,
   ): Promise<RelatedPerson>;
 }
 //wrapper class to create supa client and fetch acc context
@@ -403,6 +424,60 @@ export class SupabaseAccountRepo implements AccountRepo {
       .maybeSingle();
     if (error) throw new Error(`Failed to add related person: ${error.message}`);
     if (!data) throw new Error("Related person was not created.");
+
+    return mapRelatedPersonRow(data as RelatedPersonRow);
+  }
+//so related person operations scoped to the account holder
+  async updateRelatedPerson(
+    accountId: string,
+    personId: string,
+    fields: RelatedPersonUpdate,
+  ): Promise<RelatedPerson> {
+    const update = mapRelatedPersonUpdate(fields);
+    if (Object.keys(update).length === 0) throw new Error("At least one related-person field is required.");
+
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("id")
+      .eq("account_id", accountId)
+      .maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client
+      .from("related_people")
+      .update({ ...update, updated_at: this.now() })
+      .eq("id", personId)
+      .eq("account_holder_id", holder.id)
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(`Failed to update related person: ${error.message}`);
+    if (!data) throw new Error("Related person not found.");
+
+    return mapRelatedPersonRow(data as RelatedPersonRow);
+  }
+
+  async deleteRelatedPerson(
+    accountId: string,
+    personId: string,
+  ): Promise<RelatedPerson> {
+    const { data: holder, error: holderError } = await this.client
+      .from("account_holders")
+      .select("id")
+      .eq("account_id", accountId)
+      .maybeSingle();
+    if (holderError) throw new Error(`Failed to load account: ${holderError.message}`);
+    if (!holder) throw new Error("Account not found.");
+
+    const { data, error } = await this.client
+      .from("related_people")
+      .delete()
+      .eq("id", personId)
+      .eq("account_holder_id", holder.id)
+      .select("*")
+      .maybeSingle();
+    if (error) throw new Error(`Failed to remove related person: ${error.message}`);
+    if (!data) throw new Error("Related person not found.");
 
     return mapRelatedPersonRow(data as RelatedPersonRow);
   }
