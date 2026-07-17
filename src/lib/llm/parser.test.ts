@@ -66,6 +66,8 @@ describe("buildParserMessages", () => {
 
     expect(instruction).toContain("mock_payment only when the customer wants to pay now using saved payment details");
     expect(instruction).toContain("create_promise_to_pay only when they commit to pay a stated amount on a future date");
+    expect(instruction).toContain("A new phone or mobile number is update_account_holder");
+    expect(instruction).toContain("Use unsupported for acknowledgements or small talk");
   });
 });
 

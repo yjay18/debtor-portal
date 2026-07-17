@@ -7,7 +7,7 @@ import { ConversationStore, type Conversation, type PersistedChatMessage } from 
 import { isReadIntent, routeAccountHolderUpdate, routeCallAppointmentCreate, routeMockPayment, routePreferredContactMethodUpdate, routePromiseToPayCreate, routeReadAction, routeRelatedPersonCreate, routeRelatedPersonRemovalConfirmed, routeRelatedPersonRemovalRequest, routeRelatedPersonUpdate } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
-import type { ParsedIntent } from "@/lib/llm/parser-schema";
+import { parseProviderIntent, type ParsedIntent } from "@/lib/llm/parser-schema";
 import { processQueuedNotifications, type NotificationBatchStatus } from "@/lib/notifications/processor";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -206,6 +206,24 @@ function withoutConfirmation(conversation: Conversation) {
     queuedIntents: conversation.dialogState.queuedIntents,
   };
 }
+
+function queuedIntentToParsed(intent: { action: ChatActionResult["action"]; fields: Record<string, unknown> }): ParsedIntent {
+  return parseProviderIntent({ ...intent, additionalIntents: [], missingFields: [] });
+}
+
+function mergePendingFields(intent: ParsedIntent, conversation: Conversation): ParsedIntent {
+  const pending = conversation.dialogState.pendingAction;
+  return pending && pending.action === intent.action
+    ? { ...intent, fields: { ...pending.fields, ...intent.fields } } as ParsedIntent
+    : intent;
+}
+
+function nextIntentPrompt(result: ChatActionResult, intent: { action: ChatActionResult["action"] }): ChatActionResult {
+  return {
+    ...result,
+    reply: `${result.reply} I also found a ${intent.action.replaceAll("_", " ")} request. Reply yes to continue or no to skip it.`,
+  };
+}
 //persists the result of a read turn using an assistant message to store metadata
 // this makes it three actions 
 // Successful phone update → mutation_succeeded
@@ -282,8 +300,28 @@ export async function executeReadChatTurn(
     } else {
       result = { action: "clarify", success: false, reply: `Please reply yes to remove ${pendingRemoval.personName}, or no to cancel.` };
     }
+  } else if (pendingRemoval?.kind === "next_intent") {
+    const answer = confirmationAnswer(request.message);
+    if (answer === "yes") {
+      const intent = queuedIntentToParsed(pendingRemoval.intent);
+      result = await routeLoadedIntent({ accountId: request.accountId, account: loaded.account, intent,
+        nowIso: loaded.nowIso, rawMessage: request.message, idempotencyKey: request.idempotencyKey, repo: deps.repo });
+      const [next, ...queuedIntents] = loaded.conversation.dialogState.queuedIntents;
+      await deps.conversations.updateDialogState(loaded.conversation, result.success && next
+        ? { queuedIntents, awaitingConfirmation: { kind: "next_intent", intent: next } }
+        : { queuedIntents: result.success ? queuedIntents : [],
+            ...(!result.success && result.missingFields?.length
+              ? { pendingAction: { ...pendingRemoval.intent, missing: result.missingFields } }
+              : {}) });
+      if (result.success && next) result = nextIntentPrompt(result, next);
+    } else if (answer === "no") {
+      result = { action: pendingRemoval.intent.action, success: false, reply: "That queued request was skipped." };
+      await deps.conversations.updateDialogState(loaded.conversation, { queuedIntents: [] });
+    } else {
+      result = { action: "clarify", success: false, reply: "Please reply yes to continue with the queued request, or no to skip it." };
+    }
   } else {
-    const intent = await deps.parse(loaded.parserInput);
+    const intent = mergePendingFields(parseProviderIntent(await deps.parse(loaded.parserInput)), loaded.conversation);
     result = await routeLoadedIntent({
       accountId: request.accountId,
       account: loaded.account,
@@ -293,6 +331,9 @@ export async function executeReadChatTurn(
       idempotencyKey: request.idempotencyKey,
       repo: deps.repo,
     });
+    const followUpIntents = intent.additionalIntents.length > 0
+      ? intent.additionalIntents
+      : loaded.conversation.dialogState.queuedIntents;
     const person = removalConfirmationPerson(result);
     if (person) {
       await deps.conversations.updateDialogState(loaded.conversation, {
@@ -302,6 +343,23 @@ export async function executeReadChatTurn(
           personId: person.id,
           personName: person.name,
         },
+      });
+    } else if (result.success && followUpIntents.length > 0) {
+      const [next, ...queuedIntents] = followUpIntents;
+      await deps.conversations.updateDialogState(loaded.conversation, {
+        queuedIntents,
+        awaitingConfirmation: { kind: "next_intent", intent: next },
+      });
+      result = nextIntentPrompt(result, next);
+    } else if (!result.success && result.missingFields?.length
+      && intent.action !== "clarify" && intent.action !== "unsupported") {
+      await deps.conversations.updateDialogState(loaded.conversation, {
+        queuedIntents: followUpIntents,
+        pendingAction: { action: intent.action, fields: intent.fields, missing: result.missingFields },
+      });
+    } else if (result.success && loaded.conversation.dialogState.pendingAction) {
+      await deps.conversations.updateDialogState(loaded.conversation, {
+        queuedIntents: loaded.conversation.dialogState.queuedIntents,
       });
     }
   }
