@@ -145,7 +145,10 @@ export async function routeRelatedPersonUpdate(input: {
     people: input.account.relatedPeople,
   });
   if (resolution.status === "ambiguous") {
-    return { action: "clarify", success: false, reply: "I found more than one matching related person. Please provide their full name.", missingFields: ["selector"] };
+    const options = resolution.people.map((person) => `${person.name} (${person.email}, ${person.phone})`).join("; ");
+    return { action: "clarify", success: false,
+      reply: `I found more than one related person matching that: ${options}. Which one? Reply with their email address or phone number.`,
+      missingFields: ["selector"] };
   }
   if (resolution.status === "not_found") {
     return { action: "clarify", success: false, reply: "I couldn't identify that related person. Please provide their full name.", missingFields: ["selector"] };
@@ -184,7 +187,10 @@ export async function routeRelatedPersonRemovalRequest(input: {
     people: input.account.relatedPeople,
   });
   if (resolution.status === "ambiguous") {
-    return { action: "clarify", success: false, reply: "I found more than one matching related person. Please provide their full name.", missingFields: ["selector"] };
+    const options = resolution.people.map((person) => `${person.name} (${person.email}, ${person.phone})`).join("; ");
+    return { action: "clarify", success: false,
+      reply: `I found more than one related person matching that: ${options}. Which one? Reply with their email address or phone number.`,
+      missingFields: ["selector"] };
   }
   if (resolution.status === "not_found") {
     return { action: "clarify", success: false, reply: "I couldn't identify that related person. Please provide their full name.", missingFields: ["selector"] };

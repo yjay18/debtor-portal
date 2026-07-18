@@ -16,7 +16,7 @@ Results:
 
 - Lint passed.
 - Typecheck passed.
-- Vitest passed: 383 tests across 19 files, zero skips.
+- Vitest passed: 387 tests across 19 files, zero skips.
 - Production build passed on Next.js 16.2.10.
 - Production audit was reduced from 57 advisories to one low build time Babel advisory through Next/styled-jsx. The advisory's stated fixed version is not published yet.
 

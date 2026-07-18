@@ -20,6 +20,10 @@ function normalize(value: string) {
 function sanitize(value: string) {
   return value.normalize("NFC").replace(/\p{Cc}/gu, " ").replace(/\s+/gu, " ").trim();
 }
+//compare phones by digits only, so a selector like "+353 83 111 2233" matches a stored "+353831112233"
+function phoneKey(value: string) {
+  return normalize(value).replace(/[\s().-]/gu, "");
+}
 
 function editDistance(left: string, right: string) {
   const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -41,6 +45,12 @@ function editDistance(left: string, right: string) {
 
 function deterministicMatches(selector: string, people: RelatedPerson[]) {
   const normalizedSelector = normalize(selector);
+  //an exact email or phone match pins one record even when several people share a name
+  const byContact = people.filter((person) =>
+    normalize(person.email) === normalizedSelector
+    || phoneKey(person.phone) === phoneKey(selector));
+  if (byContact.length) return byContact;
+
   const direct = people.filter((person) => {
     const name = normalize(person.name);
     return name === normalizedSelector || name.startsWith(`${normalizedSelector} `);
@@ -92,7 +102,16 @@ export async function resolveRelatedPerson(input: {
 }): Promise<Resolution> {
   const matches = deterministicMatches(input.selector, input.people);
   if (matches.length === 1) return { status: "resolved", person: matches[0] };
-  if (matches.length > 1) return { status: "ambiguous", people: matches };
+  if (matches.length > 1) {
+    //exact duplicates (same name, email, and phone) are interchangeable — resolve one instead of dead-ending
+    const [first, ...rest] = matches;
+    const allDuplicates = rest.every((person) =>
+      normalize(person.name) === normalize(first.name)
+      && normalize(person.email) === normalize(first.email)
+      && phoneKey(person.phone) === phoneKey(first.phone));
+    if (allDuplicates) return { status: "resolved", person: first };
+    return { status: "ambiguous", people: matches };
+  }
 
   let personId: string | undefined;
   try {

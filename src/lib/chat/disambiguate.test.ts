@@ -49,4 +49,33 @@ describe("resolveRelatedPerson", () => {
       .resolves.toMatchObject({ status: "resolved", person: { id: injected.id } });
     expect(fallback).not.toHaveBeenCalled();
   });
+
+  const marks: RelatedPerson[] = [
+    { id: "mark-001", name: "Mark Murphy", email: "mark@example.com", phone: "+353831112233", authorizedToAct: true },
+    { id: "mark-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831998877", authorizedToAct: true },
+  ];
+
+  it("resolves by email when several people share a name", async () => {
+    await expect(resolveRelatedPerson({ selector: "mark@example.com", people: marks, fallback: vi.fn() }))
+      .resolves.toMatchObject({ status: "resolved", person: { id: "mark-001" } });
+  });
+
+  it("resolves by phone even when the selector is formatted", async () => {
+    await expect(resolveRelatedPerson({ selector: "+353 83 199 8877", people: marks, fallback: vi.fn() }))
+      .resolves.toMatchObject({ status: "resolved", person: { id: "mark-002" } });
+  });
+
+  it("stays ambiguous when same-named people have different contact details", async () => {
+    await expect(resolveRelatedPerson({ selector: "Mark Murphy", people: marks, fallback: vi.fn() }))
+      .resolves.toMatchObject({ status: "ambiguous", people: [{ id: "mark-001" }, { id: "mark-002" }] });
+  });
+
+  it("resolves exact duplicates to one record instead of dead-ending", async () => {
+    const dupes: RelatedPerson[] = [
+      { id: "dupe-001", name: "Mark Murphy", email: "mark@example.test", phone: "+353831998877", authorizedToAct: true },
+      { id: "dupe-002", name: "Mark Murphy", email: "mark@example.test", phone: "+353831998877", authorizedToAct: false },
+    ];
+    await expect(resolveRelatedPerson({ selector: "Mark Murphy", people: dupes, fallback: vi.fn() }))
+      .resolves.toMatchObject({ status: "resolved", person: { id: "dupe-001" } });
+  });
 });

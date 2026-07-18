@@ -88,7 +88,7 @@ Latest local evidence:
 
 - `CI=true pnpm lint` passed.
 - `CI=true pnpm typecheck` passed.
-- `CI=true pnpm test` passed: 383 tests across 19 files, zero skips.
+- `CI=true pnpm test` passed: 387 tests across 19 files, zero skips.
 - `CI=true pnpm build` passed with Next.js 16.2.10.
 - `pnpm audit --prod` reports one low build time Babel advisory through Next/styled-jsx; the advisory's stated fixed release is not published yet.
 
