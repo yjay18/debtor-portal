@@ -89,6 +89,9 @@ describe("parseMessage", () => {
   it.each([
     ["What is my current account balance?", "balance"],
     ["What is my email address?", "email"],
+    ["What is my phone number?", "phone"],
+    ["What is the support email?", "support_email"],
+    ["What is the support phone number?", "support_phone"],
     ["When is my bill due?", "due_date"],
     ["What is my account reference?", "reference"],
   ])("returns the singular %s account topic without asking the model", async (message, topic) => {
@@ -97,6 +100,17 @@ describe("parseMessage", () => {
     await expect(parseMessage({ ...input, message }, fakeClient(completeJson)))
       .resolves.toEqual({ action: "read_account", fields: { topic }, additionalIntents: [], missingFields: [] });
     expect(completeJson).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["What is John Murphy’s email?", "read_related_people"],
+    ["What is the status of my payment?", "read_transactions"],
+  ])("defers the contextual request %s to structured extraction", async (message, action) => {
+    const completeJson = vi.fn().mockResolvedValue({ action, fields: {}, additionalIntents: [], missingFields: [], clarificationQuestion: null });
+
+    await expect(parseMessage({ ...input, message }, fakeClient(completeJson)))
+      .resolves.toMatchObject({ action });
+    expect(completeJson).toHaveBeenCalledTimes(1);
   });
 
   it("passes the strict schema and returns locally validated output", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServerSupabaseClient } from "../supabase/server";
+import { MAX_CHAT_MESSAGE_LENGTH } from "./limits";
 //using zod to validate the chat states like we did with supabase
 export const chatActionSchema = z.enum([
   "read_account", "update_account_holder", "read_preferred_contact_method",
@@ -77,12 +78,12 @@ const newMessageSchema = z.discriminatedUnion("role", [
   z.object({
     conversationId: z.uuid(),
     role: z.literal("account_holder"),
-    content: z.string().min(1),
+    content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
   }).strict(),
   z.object({
     conversationId: z.uuid(),
     role: z.literal("assistant"),
-    content: z.string().min(1),
+    content: z.string().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
     action: chatActionSchema,
     metadata: messageAuditSchema,
   }).strict(),

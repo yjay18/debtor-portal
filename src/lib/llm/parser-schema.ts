@@ -2,7 +2,7 @@ import { z } from "zod";
 //building the parser using zod to enforce the structure of the intent and actions
 import type { ChatAction } from "@/lib/chat/types";
 //lot of fields are optional because users may not provude all the info at the same time, like say i want to pay and then next message the amount. so thats why
-const textSchema = z.string().trim().min(1);
+const textSchema = z.string().trim().min(1).max(1_000);
 const emptyFieldsSchema = z.object({}).strict();
 const accountFieldsSchema = z.object({
   firstName: textSchema.optional(),

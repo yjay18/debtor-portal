@@ -1,0 +1,2 @@
+export const MAX_ACCOUNT_ID_LENGTH = 128;
+export const MAX_CHAT_MESSAGE_LENGTH = 4_000;

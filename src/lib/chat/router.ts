@@ -324,6 +324,8 @@ function singularAccountReadReply(topic: string | undefined, account: AccountCon
     case "name": return `The account holder is ${holder.accountHolderFirstName} ${holder.accountHolderLastName}.`;
     case "email": return `Your email address is ${holder.email}.`;
     case "phone": return `Your phone number is ${holder.phone}.`;
+    case "support_email": return `The support email address is ${account.support.supportEmail}.`;
+    case "support_phone": return `The support phone number is ${account.support.supportPhone}.`;
     case "address": return `Your address is ${[holder.address.line1, holder.address.line2, holder.address.city, holder.address.postalCode, holder.address.country].filter(Boolean).join(", ")}.`;
     case "preferred_contact_method": return `Your preferred contact method is ${holder.preferredContactMethod}.`;
     case "reference": return `Your account reference is ${holder.reference}.`;

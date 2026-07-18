@@ -84,6 +84,8 @@ describe("routeReadAction", () => {
     ["balance", "Your current balance is €1,285.00."],
     ["email", "Your email address is jane.murphy@example.test."],
     ["phone", "Your phone number is +353831234567."],
+    ["support_email", "The support email address is support@example.test."],
+    ["support_phone", "The support phone number is +35318000000."],
     ["reference", "Your account reference is EI-2026-000123."],
     ["due_date", "Your bill is due on 2026-01-24."],
   ])("returns only the requested %s account value", async (topic, reply) => {

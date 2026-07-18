@@ -27,6 +27,7 @@ import {
   type Transaction,
 } from "@/lib/account/types";
 import type { ChatResponse } from "@/lib/chat/types";
+import { acquireRequestLock, releaseRequestLock } from "@/lib/chat/request-lock";
 import { cn } from "@/lib/utils";
 
 type PortalProps = {
@@ -102,12 +103,13 @@ export function DebtorPortal({ accountContext }: PortalProps) {
   const [isSending, setIsSending] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string>();
+  const sendLock = useRef(false);
   const fullName = `${currentAccountContext.account.accountHolderFirstName} ${currentAccountContext.account.accountHolderLastName}`;
 
   const handleSendMessage = async () => {
     const nextMessage = draft.trim();
 
-    if (!nextMessage || isSending) {
+    if (!nextMessage || !acquireRequestLock(sendLock)) {
       return;
     }
 
@@ -169,6 +171,7 @@ export function DebtorPortal({ accountContext }: PortalProps) {
         },
       ]);
     } finally {
+      releaseRequestLock(sendLock);
       setIsSending(false);
     }
   };

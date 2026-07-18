@@ -6,14 +6,15 @@ import type { AccountContext, RelatedPerson } from "@/lib/account/types";
 import { ConversationStore, type Conversation, type PersistedChatMessage } from "@/lib/chat/conversation";
 import { isReadIntent, routeAccountHolderUpdate, routeCallAppointmentCreate, routeMockPayment, routePreferredContactMethodUpdate, routePromiseToPayCreate, routeReadAction, routeRelatedPersonCreate, routeRelatedPersonRemovalConfirmed, routeRelatedPersonRemovalRequest, routeRelatedPersonUpdate } from "@/lib/chat/router";
 import type { ChatActionResult, ChatRequest, ChatResponse } from "@/lib/chat/types";
+import { MAX_ACCOUNT_ID_LENGTH, MAX_CHAT_MESSAGE_LENGTH } from "@/lib/chat/limits";
 import { parseMessage, type ParserInput } from "@/lib/llm/parser";
 import { parseProviderIntent, type ParsedIntent } from "@/lib/llm/parser-schema";
 import { processQueuedNotifications, type NotificationBatchStatus } from "@/lib/notifications/processor";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const chatRequestSchema = z.object({
-  accountId: z.string().trim().min(1),
-  message: z.string().trim().min(1),
+  accountId: z.string().trim().min(1).max(MAX_ACCOUNT_ID_LENGTH),
+  message: z.string().trim().min(1).max(MAX_CHAT_MESSAGE_LENGTH),
   conversationId: z.uuid().optional(),
   idempotencyKey: z.uuid(),
 }).strict();

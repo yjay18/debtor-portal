@@ -108,29 +108,30 @@ function safeClarification(): ParsedIntent {
 }
 
 const singularAccountTopics = [
-  ["preferred_contact_method", /\b(?:preferred\s+)?contact\s+method\b/u],
-  ["email", /\be-?mail\b/u],
-  ["phone", /\b(?:phone|mobile)\b/u],
-  ["address", /\baddress\b/u],
-  ["reference", /\b(?:reference|account\s+(?:number|id))\b/u],
-  ["creditor", /\b(?:creditor|who\s+do\s+i\s+owe)\b/u],
-  ["currency", /\bcurrency\b/u],
-  ["balance", /\b(?:balance|amount\s+due|how\s+much\s+do\s+i\s+owe)\b/u],
+  ["support_email", /\b(?:support|helpdesk)\s+e-?mail(?:\s+address)?\b/u],
+  ["support_phone", /\b(?:support|helpdesk)\s+(?:phone(?:\s+number)?|telephone(?:\s+number)?|number)\b/u],
+  ["preferred_contact_method", /\bmy\s+(?:preferred\s+)?contact\s+method\b/u],
+  ["email", /\b(?:my\s+e-?mail(?:\s+address)?|e-?mail(?:\s+address)?\s+(?:on\s+(?:my\s+)?account|on\s+file|for\s+me)|account\s+e-?mail(?:\s+address)?)\b/u],
+  ["phone", /\b(?:my\s+(?:phone|mobile)(?:\s+number)?|(?:phone|mobile)(?:\s+number)?\s+(?:on\s+(?:my\s+)?account|on\s+file|for\s+me)|account\s+(?:phone|mobile)(?:\s+number)?)\b/u],
+  ["address", /\b(?:my\s+address|address\s+(?:on\s+(?:my\s+)?account|on\s+file|for\s+me)|account\s+address)\b/u],
+  ["reference", /\b(?:my\s+account\s+reference|account\s+(?:reference|number|id))\b/u],
+  ["creditor", /\b(?:my\s+creditor|creditor\s+(?:on|for)\s+my\s+account|who\s+do\s+i\s+owe)\b/u],
+  ["currency", /\b(?:my\s+(?:account\s+)?currency|account\s+currency|currency\s+(?:on|of|for)\s+my\s+account)\b/u],
+  ["balance", /\b(?:my\s+(?:current\s+)?(?:account\s+)?balance|current\s+(?:account\s+)?balance|account\s+balance|amount\s+due|how\s+much\s+do\s+i\s+owe)\b/u],
   ["days_past_due", /\b(?:days?\s+(?:past\s+)?due|days?\s+overdue)\b/u],
   ["minimum_payment", /\bminimum\s+(?:payment|amount)\b/u],
-  ["due_date", /\b(?:due\s+date|bill\s+due|payment\s+due)\b/u],
+  ["due_date", /\b(?:my\s+)?(?:due\s+date|bill\s+due|payment\s+due)\b/u],
   ["last_payment", /\blast\s+payment\b/u],
   ["last_statement", /\b(?:last\s+statement|statement\s+amount)\b/u],
   ["name", /\b(?:my\s+name|account\s+holder)\b/u],
-  ["status", /\b(?:account\s+status|status)\b/u],
+  ["status", /\b(?:my\s+(?:account\s+)?status|account\s+status|status\s+of\s+my\s+account)\b/u],
 ] as const;
 
 function singularAccountReadIntent(message: string): ParsedIntent | undefined {
   const normalized = message.toLocaleLowerCase("en");
   if (!/\b(?:what|show|tell|which|when|how|current|is|are)\b/u.test(normalized)
     || /\b(?:change|update|set|add|remove)\b/u.test(normalized)) return undefined;
-  const matchedTopics = singularAccountTopics.filter(([, pattern]) => pattern.test(normalized));
-  const topics = matchedTopics.filter(([topic]) => topic !== "address" || !matchedTopics.some(([otherTopic]) => otherTopic === "email"));
+  const topics = singularAccountTopics.filter(([, pattern]) => pattern.test(normalized));
   if (topics.length !== 1) return undefined;
   return { action: "read_account", fields: { topic: topics[0][0] }, additionalIntents: [], missingFields: [] };
 }

@@ -7,8 +7,8 @@ import { loadQueuedNotificationBatch, processQueuedNotifications, updateNotifica
 const accountHolderId = "11111111-1111-4111-8111-111111111111";
 function createClient(result: unknown) {
   const order = vi.fn().mockResolvedValue(result);
-  const query = { eq: vi.fn(), order };
-  query.eq.mockReturnValue(query);
+  const query = { eq: vi.fn(), in: vi.fn(), order };
+  query.eq.mockReturnValue(query); query.in.mockReturnValue(query);
   const select = vi.fn().mockReturnValue(query);
   const from = vi.fn().mockReturnValue({ select });
   return { client: { from } as never, from, query };
@@ -22,11 +22,12 @@ function createUpdateClient(result: unknown) {
   return { client: { from: vi.fn().mockReturnValue({ update }) } as never, query, update };
 }
 
-it("loads oldest-first queued attempts into one deduplicated batch", async () => {
+it("loads oldest-first queued and failed attempts into one deduplicated batch", async () => {
   const rows = [{ id: "22222222-2222-4222-8222-222222222222", account_holder_id: accountHolderId, trigger_action: "account_holders:update" }, { id: "33333333-3333-4333-8333-333333333333", account_holder_id: accountHolderId, trigger_action: "account_holders:update" }];
   const fake = createClient({ data: rows, error: null });
   await expect(loadQueuedNotificationBatch(fake.client, accountHolderId)).resolves.toEqual({ accountHolderId, attemptIds: rows.map((row) => row.id), triggerActions: ["account_holders:update"] });
-  expect(fake.query.eq.mock.calls).toEqual([["account_holder_id", accountHolderId], ["status", "queued"]]);
+  expect(fake.query.eq).toHaveBeenCalledWith("account_holder_id", accountHolderId);
+  expect(fake.query.in).toHaveBeenCalledWith("status", ["queued", "failed"]);
   expect(fake.query.order).toHaveBeenCalledWith("created_at", { ascending: true });
 });
 
@@ -41,8 +42,8 @@ it.each([["logged", null], ["sent", null], ["failed", "Notification delivery fai
   const fake = createUpdateClient({ data: [{ id: batch.attemptIds[0] }], error: null });
   await updateNotificationBatchStatus(fake.client, batch, status);
   expect(fake.update).toHaveBeenCalledWith({ status, error_message: errorMessage });
-  expect(fake.query.eq.mock.calls).toEqual([["account_holder_id", accountHolderId], ["status", "queued"]]);
-  expect(fake.query.in).toHaveBeenCalledWith("id", batch.attemptIds);
+  expect(fake.query.eq).toHaveBeenCalledWith("account_holder_id", accountHolderId);
+  expect(fake.query.in.mock.calls).toEqual([["status", ["queued", "failed"]], ["id", batch.attemptIds]]);
 });
 it("rejects an empty batch", async () => expect(updateNotificationBatchStatus(createUpdateClient({ data: [], error: null }).client, { ...batch, attemptIds: [] }, "logged")).rejects.toThrow("Notification batch has no attempts."));
 it("rejects a status query error", async () => expect(updateNotificationBatchStatus(createUpdateClient({ data: null, error: { message: "unavailable" } }).client, batch, "sent")).rejects.toThrow("Failed to update notification status: unavailable"));

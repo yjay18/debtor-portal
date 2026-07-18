@@ -394,6 +394,8 @@ describe("parseChatRequest", () => {
   it.each([
     ["a missing account", { message: "Show my account" }],
     ["a blank message", { accountId: "acc_standard_001", message: "   " }],
+    ["an overlong account ID", { ...validRequest, accountId: "a".repeat(129) }],
+    ["an overlong message", { ...validRequest, message: "x".repeat(4_001) }],
     ["an invalid conversation ID", { ...validRequest, conversationId: "starter-conversation" }],
     ["an invalid idempotency key", { ...validRequest, idempotencyKey: "retry-1" }],
     ["an unknown field", { ...validRequest, inventedAction: "update_balance" }],

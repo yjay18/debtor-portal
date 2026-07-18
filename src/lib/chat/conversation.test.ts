@@ -343,6 +343,10 @@ it.each([
     input: { conversationId: persistedConversationId, role: "account_holder", content: "" },
   },
   {
+    name: "overlong content",
+    input: { conversationId: persistedConversationId, role: "account_holder", content: "x".repeat(4_001) },
+  },
+  {
     name: "customer action claim",
     input: {
       conversationId: persistedConversationId,

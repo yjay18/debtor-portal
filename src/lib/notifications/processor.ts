@@ -21,7 +21,7 @@ export async function loadQueuedNotificationBatch(
   const { data, error } = await client.from("notification_attempts")
     .select("id,account_holder_id,trigger_action")
     .eq("account_holder_id", accountHolderId)
-    .eq("status", "queued")
+    .in("status", ["queued", "failed"])
     .order("created_at", { ascending: true });
   if (error) throw new Error(`Failed to load queued notifications: ${error.message}`);
 //runtime validation of returned rows
@@ -37,7 +37,7 @@ export async function updateNotificationBatchStatus(client: SupabaseClient, batc
   const changes = { status, error_message: status === "failed" ? "Notification delivery failed." : null };
   //we throw this error to avoid exposing details of notification system to user
   const { data, error } = await client.from("notification_attempts").update(changes)
-    .eq("account_holder_id", batch.accountHolderId).eq("status", "queued")
+    .eq("account_holder_id", batch.accountHolderId).in("status", ["queued", "failed"])
     .in("id", batch.attemptIds).select("id");
   if (error) throw new Error(`Failed to update notification status: ${error.message}`);
 
