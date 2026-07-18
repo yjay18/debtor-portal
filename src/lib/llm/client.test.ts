@@ -35,6 +35,7 @@ it("sends a deterministic structured-output request", async () => {
   expect(JSON.parse(init.body)).toMatchObject({
     model: "test-small-model",
     temperature: 0,
+    stream: false,
     n: 1,
     response_format: {
       type: "json_schema",

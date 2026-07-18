@@ -42,7 +42,7 @@ export class OpenAiCompatibleClient {
     private readonly config: LlmClientConfig,
     private readonly fetcher: typeof fetch = fetch,
   ) {}
-
+//we set stream to false for ollama compatibility, as we need to parse the entire response at once
   async completeJson(messages: LlmMessage[], jsonSchema?: LlmJsonSchema) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 15_000);
@@ -52,6 +52,7 @@ export class OpenAiCompatibleClient {
       ...(this.config.reasoningEffort
         ? { reasoning_effort: this.config.reasoningEffort }
         : { temperature: 0 }),
+      stream: false,
       n: 1,
       ...(jsonSchema && this.config.supportsJsonSchema ? {
         response_format: {
