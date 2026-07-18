@@ -80,11 +80,18 @@ describe("isReadIntent", () => {
 });
 
 describe("routeReadAction", () => {
-  it("returns only a formatted balance for the balance topic", async () => {
+  it.each([
+    ["balance", "Your current balance is €1,285.00."],
+    ["email", "Your email address is jane.murphy@example.test."],
+    ["phone", "Your phone number is +353831234567."],
+    ["reference", "Your account reference is EI-2026-000123."],
+    ["due_date", "Your bill is due on 2026-01-24."],
+  ])("returns only the requested %s account value", async (topic, reply) => {
     const result = await routeReadAction({ accountId: "acc_standard_001",
-      intent: { action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] }, repo: createRepo(), nowIso });
+      intent: { action: "read_account", fields: { topic }, additionalIntents: [], missingFields: [] }, repo: createRepo(), nowIso });
 
-    expect(result).toEqual({ action: "read_account", success: true, reply: "Your current balance is €1,285.00." });
+    expect(result).toEqual({ action: "read_account", success: true, reply });
+    expect(result).not.toHaveProperty("account");
   });
 
   it("prefixes unsupported requests with an explicit apology", async () => {
@@ -347,7 +354,7 @@ describe("routeReadAction", () => {
     expect(result).toMatchObject({ action: "read_account", success: true, account });
   });
 
-  it("returns the persisted preferred contact method", async () => {
+  it("returns only the persisted preferred contact method", async () => {
     const result = await routeReadAction({
       accountId: "acc_standard_001",
       intent: readIntent("read_preferred_contact_method"),
@@ -359,8 +366,8 @@ describe("routeReadAction", () => {
       action: "read_preferred_contact_method",
       success: true,
       reply: "Your preferred contact method is email.",
-      account,
     });
+    expect(result).not.toHaveProperty("account");
   });
 
   it.each([

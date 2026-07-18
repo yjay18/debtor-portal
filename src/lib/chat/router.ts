@@ -313,6 +313,32 @@ type ReadRepo = Pick<AccountRepo, "getAccountContextByAccountId">;
 function describeCount(count: number, singular: string, plural: string): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+function formatAccountCurrency(cents: number, currency: string): string {
+  return new Intl.NumberFormat("en-IE", { style: "currency", currency }).format(cents / 100);
+}
+
+function singularAccountReadReply(topic: string | undefined, account: AccountContext): string | undefined {
+  const holder = account.account;
+  switch (topic?.trim().toLocaleLowerCase("en")) {
+    case "name": return `The account holder is ${holder.accountHolderFirstName} ${holder.accountHolderLastName}.`;
+    case "email": return `Your email address is ${holder.email}.`;
+    case "phone": return `Your phone number is ${holder.phone}.`;
+    case "address": return `Your address is ${[holder.address.line1, holder.address.line2, holder.address.city, holder.address.postalCode, holder.address.country].filter(Boolean).join(", ")}.`;
+    case "preferred_contact_method": return `Your preferred contact method is ${holder.preferredContactMethod}.`;
+    case "reference": return `Your account reference is ${holder.reference}.`;
+    case "creditor": return `Your creditor is ${holder.creditorName}.`;
+    case "currency": return `This account is billed in ${holder.currency}.`;
+    case "balance": return `Your current balance is ${formatAccountCurrency(holder.balanceCents, holder.currency)}.`;
+    case "status": return `Your account status is ${holder.status}.`;
+    case "days_past_due": return `Your account is ${holder.daysPastDue} days past due.`;
+    case "minimum_payment": return `Your minimum payment is ${formatAccountCurrency(holder.minimumPaymentCents, holder.currency)}.`;
+    case "due_date": return `Your bill is due on ${account.billing.dueDate}.`;
+    case "last_payment": return `Your last payment was ${formatAccountCurrency(holder.lastPaymentAmountCents, holder.currency)} on ${holder.lastPaymentDate}.`;
+    case "last_statement": return `Your last statement amount was ${formatAccountCurrency(account.billing.lastStatementAmountCents, holder.currency)}.`;
+    default: return undefined;
+  }
+}
 //for future scheduled calls, some data time management
 export function futureScheduledCalls(
   calls: CallAppointment[],
@@ -365,18 +391,16 @@ export async function routeReadAction(input: {
   }
 
   switch (intent.action) {
-    case "read_account":
-      if (intent.fields.topic === "balance") {
-        return { action: intent.action, success: true,
-          reply: `Your current balance is ${new Intl.NumberFormat("en-IE", { style: "currency", currency: account.account.currency }).format(account.account.balanceCents / 100)}.` };
-      }
+    case "read_account": {
+      const singularReply = singularAccountReadReply(intent.fields.topic, account);
+      if (singularReply) return { action: intent.action, success: true, reply: singularReply };
       return { action: intent.action, success: true, reply: "Here are your current account details.", account };
+    }
     case "read_preferred_contact_method":
       return {
         action: intent.action,
         success: true,
         reply: `Your preferred contact method is ${account.account.preferredContactMethod}.`,
-        account,
       };
     case "read_related_people":
       return {

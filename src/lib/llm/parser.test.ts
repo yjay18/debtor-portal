@@ -86,11 +86,16 @@ describe("parseMessage", () => {
     expect(completeJson).not.toHaveBeenCalled();
   });
 
-  it("returns a balance-only read without asking the model to infer extra intents", async () => {
+  it.each([
+    ["What is my current account balance?", "balance"],
+    ["What is my email address?", "email"],
+    ["When is my bill due?", "due_date"],
+    ["What is my account reference?", "reference"],
+  ])("returns the singular %s account topic without asking the model", async (message, topic) => {
     const completeJson = vi.fn();
 
-    await expect(parseMessage({ ...input, message: "What is my current account balance?" }, fakeClient(completeJson)))
-      .resolves.toEqual({ action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] });
+    await expect(parseMessage({ ...input, message }, fakeClient(completeJson)))
+      .resolves.toEqual({ action: "read_account", fields: { topic }, additionalIntents: [], missingFields: [] });
     expect(completeJson).not.toHaveBeenCalled();
   });
 

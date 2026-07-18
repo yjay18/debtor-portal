@@ -107,12 +107,32 @@ function safeClarification(): ParsedIntent {
   };
 }
 
-function balanceOnlyIntent(message: string): ParsedIntent | undefined {
+const singularAccountTopics = [
+  ["preferred_contact_method", /\b(?:preferred\s+)?contact\s+method\b/u],
+  ["email", /\be-?mail\b/u],
+  ["phone", /\b(?:phone|mobile)\b/u],
+  ["address", /\baddress\b/u],
+  ["reference", /\b(?:reference|account\s+(?:number|id))\b/u],
+  ["creditor", /\b(?:creditor|who\s+do\s+i\s+owe)\b/u],
+  ["currency", /\bcurrency\b/u],
+  ["balance", /\b(?:balance|amount\s+due|how\s+much\s+do\s+i\s+owe)\b/u],
+  ["days_past_due", /\b(?:days?\s+(?:past\s+)?due|days?\s+overdue)\b/u],
+  ["minimum_payment", /\bminimum\s+(?:payment|amount)\b/u],
+  ["due_date", /\b(?:due\s+date|bill\s+due|payment\s+due)\b/u],
+  ["last_payment", /\blast\s+payment\b/u],
+  ["last_statement", /\b(?:last\s+statement|statement\s+amount)\b/u],
+  ["name", /\b(?:my\s+name|account\s+holder)\b/u],
+  ["status", /\b(?:account\s+status|status)\b/u],
+] as const;
+
+function singularAccountReadIntent(message: string): ParsedIntent | undefined {
   const normalized = message.toLocaleLowerCase("en");
-  if (!/\bbalance\b/u.test(normalized)
-    || /\b(?:pay|payment|clear|settle|transaction|promise|call|contact|people)\b/u.test(normalized)
-    || !/\b(?:what|show|tell|how much|current)\b/u.test(normalized)) return undefined;
-  return { action: "read_account", fields: { topic: "balance" }, additionalIntents: [], missingFields: [] };
+  if (!/\b(?:what|show|tell|which|when|how|current|is|are)\b/u.test(normalized)
+    || /\b(?:change|update|set|add|remove)\b/u.test(normalized)) return undefined;
+  const matchedTopics = singularAccountTopics.filter(([, pattern]) => pattern.test(normalized));
+  const topics = matchedTopics.filter(([topic]) => topic !== "address" || !matchedTopics.some(([otherTopic]) => otherTopic === "email"));
+  if (topics.length !== 1) return undefined;
+  return { action: "read_account", fields: { topic: topics[0][0] }, additionalIntents: [], missingFields: [] };
 }
 
 function unsupportedDirectBalanceEditIntent(message: string): ParsedIntent | undefined {
@@ -134,7 +154,7 @@ export async function parseMessage(
 ): Promise<ParsedIntent> {
   const unsupportedIntent = unsupportedDirectBalanceEditIntent(input.message);
   if (unsupportedIntent) return unsupportedIntent;
-  const directIntent = balanceOnlyIntent(input.message);
+  const directIntent = singularAccountReadIntent(input.message);
   if (directIntent) return directIntent;
   const messages = buildParserMessages(input);
   const schema = { name: "account_self_service_intent", schema: parsedIntentJsonSchema };
