@@ -1,7 +1,7 @@
 import { PaymentRepoError, type AccountRepo } from "@/lib/account/repo";
 import type { AccountContext, CallAppointment, RelatedPerson } from "@/lib/account/types";
 import type { ChatActionResult } from "@/lib/chat/types";
-import { buildAccountHolderUpdateSummary, buildCallAppointmentCreateSummary, buildPaymentSummary, buildPromiseToPayCreateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "@/lib/chat/change-summary";
+import { buildAccountHolderUpdateSummary, buildCallAppointmentCreateSummary, buildPaymentSummary, buildPromiseToPayCreateSummary, buildRelatedPersonCreateSummary, buildRelatedPersonRemoveSummary, buildRelatedPersonUpdateSummary, formatDublinDateTime, previewAccountHolderUpdate, previewRelatedPersonUpdate } from "@/lib/chat/change-summary";
 import { resolveRelatedPerson } from "@/lib/chat/disambiguate";
 import { validateAccountHolderUpdate, validateCallAppointmentCreate, validateMockPayment, validatePreferredContactMethodUpdate, validatePromiseToPayCreate, validateRelatedPersonCreate, validateRelatedPersonRemove, validateRelatedPersonUpdate } from "@/lib/chat/validation";
 import type { ParsedIntent } from "@/lib/llm/parser-schema";
@@ -303,7 +303,8 @@ export async function routeCallAppointmentCreate(input: {
     return { action: "clarify", success: false, reply: validation.intent.clarificationQuestion ?? "What future date and time should I use?", missingFields: validation.intent.missingFields };
   }
   const created = await input.repo.addCallAppointment(input.accountId, validation.fields);
-  return { action: "book_call_appointment", success: true, reply: `Your call appointment was booked for ${created.scheduledAt}.`,
+  return { action: "book_call_appointment", success: true,
+    reply: `Your call appointment is booked for ${formatDublinDateTime(created.scheduledAt)} (Europe/Dublin). We'll call you on ${created.phone}.`,
     account: { ...input.account, callAppointments: [...input.account.callAppointments, created] }, callAppointments: [created],
     notificationQueued: true, changeSummary: buildCallAppointmentCreateSummary(created) };
 }

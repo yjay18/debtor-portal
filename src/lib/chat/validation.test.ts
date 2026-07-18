@@ -58,7 +58,6 @@ describe("validateAccountHolderUpdate", () => {
     ["missing plus", "353831112233"],
     ["too short", "+123456"],
     ["too long", "+1234567890123456"],
-    ["contains spaces", "+353 83 111 2233"],
     ["contains letters", "+35383CALLME"],
   ])("clarifies a phone number with %s", (_name, phone) => {
     const result = validateAccountHolderUpdate(accountUpdate({ phone }));
@@ -71,6 +70,15 @@ describe("validateAccountHolderUpdate", () => {
         clarificationQuestion: "What phone number should I use? Please include + and the country code.",
       },
     });
+  });
+
+  it.each([
+    ["spaces", "+353 83 111 2233"],
+    ["dashes", "+353-83-111-2233"],
+    ["parentheses and spaces", "+353 (83) 111 2233"],
+  ])("accepts a phone number that %s once formatting is removed", (_name, phone) => {
+    expect(validateAccountHolderUpdate(accountUpdate({ phone })))
+      .toMatchObject({ status: "ready", fields: { phone: "+353831112233" } });
   });
 
   it("clarifies when no update field is present", () => {

@@ -90,6 +90,8 @@ describe("parseMessage", () => {
     ["What is my current account balance?", "balance"],
     ["What is my email address?", "email"],
     ["What is my phone number?", "phone"],
+    ["What phone number is on my account?", "phone"],
+    ["What email is on my account?", "email"],
     ["What is the support email?", "support_email"],
     ["What is the support phone number?", "support_phone"],
     ["When is my bill due?", "due_date"],

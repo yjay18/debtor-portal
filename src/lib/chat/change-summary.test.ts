@@ -72,7 +72,7 @@ it("builds separate balance and transaction evidence for a payment", () => {
 it("builds a created call-appointment summary from the persisted row", () => {
   expect(buildCallAppointmentCreateSummary({ id: "call-002", scheduledAt: "2026-07-21T09:00:00.000Z", phone: "+353831234567", reason: "Discuss my account", status: "scheduled" }))
     .toEqual([{ kind: "created", entity: "call_appointment", label: "Call appointment", fields: [
-      { field: "Scheduled for", after: "2026-07-21T09:00:00.000Z" }, { field: "Phone", after: "+353831234567" },
+      { field: "Scheduled for", after: "Tuesday 21 July 2026 at 10:00 (Europe/Dublin)" }, { field: "Phone", after: "+353831234567" },
       { field: "Reason", after: "Discuss my account" }, { field: "Status", after: "Scheduled" },
     ] }]);
 });

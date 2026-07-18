@@ -620,12 +620,12 @@ function ChatResultDetails({
           </div>
         </div>
       ))}
+      {rows.length ? <div className="grid gap-3 sm:grid-cols-2">{rows}</div> : null}
       {result.notificationQueued ? (
         <div className="flex items-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs font-medium text-sky-800">
           <CheckCircle2 className="size-4" /> Notification attempt recorded. Open the secure PDF with the last 4 digits of your current phone number.
         </div>
       ) : null}
-      {rows.length ? <div className="grid gap-3 sm:grid-cols-2">{rows}</div> : null}
     </div>
   );
 }

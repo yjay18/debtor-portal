@@ -3,6 +3,16 @@ import type { RelatedPerson } from "@/lib/account/types";
 import type { AccountHolderUpdate, RelatedPersonUpdate } from "@/lib/account/repo";
 import type { ChangeSummary } from "./types";
 
+//render a stored UTC timestamp in Europe/Dublin so replies and change cards match what the customer asked for
+export function formatDublinDateTime(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  return new Intl.DateTimeFormat("en-IE", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Europe/Dublin",
+  }).format(date);
+}
+
 export function buildUpdateSummary(input: {
   entity: ChangeSummary["entity"];
   label: string;
@@ -95,7 +105,7 @@ export function buildPaymentSummary(input: {
 
 export function buildCallAppointmentCreateSummary(call: CallAppointment): ChangeSummary[] {
   return buildCreateSummary({ entity: "call_appointment", label: "Call appointment", fields: [
-    { field: "Scheduled for", after: call.scheduledAt },
+    { field: "Scheduled for", after: `${formatDublinDateTime(call.scheduledAt)} (Europe/Dublin)` },
     { field: "Phone", after: call.phone },
     ...(call.reason ? [{ field: "Reason", after: call.reason }] : []),
     { field: "Status", after: "Scheduled" },

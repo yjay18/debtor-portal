@@ -25,12 +25,24 @@ function sanitizedText(maxLength: number) {
     .transform(sanitizeFreeText)
     .pipe(z.string().min(1).max(maxLength));
 }
+//strip common phone formatting (spaces, dashes, parentheses, dots) before validating shape
+function normalizePhone(value: string): string {
+  return value.replace(/[\s().-]/gu, "");
+}
+//phones must reduce to E.164: a leading + and 7-15 digits once formatting is removed
+function phoneField() {
+  return z.string()
+    .max(40)
+    .transform(sanitizeFreeText)
+    .transform(normalizePhone)
+    .pipe(z.string().regex(/^\+\d{7,15}$/));
+}
 //hard limits after text sanitization to avoid malicious input and prompt injection
 const updateAccountFieldsSchema = z.object({
   firstName: sanitizedText(100).optional(),
   lastName: sanitizedText(100).optional(),
   email: sanitizedText(254).pipe(z.email()).optional(),
-  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)).optional(),
+  phone: phoneField().optional(),
   addressLine1: sanitizedText(200).optional(),
   addressLine2: sanitizedText(200).optional(),
   city: sanitizedText(100).optional(),
@@ -43,7 +55,7 @@ const updateAccountFieldsSchema = z.object({
 const relatedPersonCreateSchema = z.object({
   name: sanitizedText(100),
   email: sanitizedText(254).pipe(z.email()),
-  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)),
+  phone: phoneField(),
   relationship: sanitizedText(100).optional(),
   authorizedToAct: z.boolean().optional(),
 }).strict();
@@ -76,7 +88,7 @@ const relatedPersonUpdateSchema = z.object({
   selector: sanitizedText(100),
   name: sanitizedText(100).optional(),
   email: sanitizedText(254).pipe(z.email()).optional(),
-  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)).optional(),
+  phone: phoneField().optional(),
   relationship: sanitizedText(100).optional(),
   authorizedToAct: z.boolean().optional(),
 }).strict().refine((fields) => Object.entries(fields).some(([key, value]) => key !== "selector" && value !== undefined), {
@@ -88,7 +100,7 @@ const relatedPersonRemoveSchema = z.object({
 }).strict();
 
 const callAppointmentDetailsSchema = z.object({
-  phone: sanitizedText(16).pipe(z.string().regex(/^\+\d{7,15}$/)),
+  phone: phoneField(),
   reason: sanitizedText(500).optional(),
 }).strict();
 
@@ -213,7 +225,11 @@ export function validateRelatedPersonCreate(
 
   const missingFields = [...new Set(result.error.issues.map((issue) => String(issue.path[0])) )];
   const firstField = missingFields[0];
-  const label = firstField === "name" ? "their name" : firstField === "phone" ? "their phone number" : "their email address";
+  const question = firstField === "name"
+    ? "To add someone, what is their name?"
+    : firstField === "phone"
+      ? "To add someone, what is their phone number? Please include + and the country code."
+      : "To add someone, what is their email address?";
   return {
     status: "clarify",
     intent: {
@@ -221,7 +237,7 @@ export function validateRelatedPersonCreate(
       fields: {},
       additionalIntents: intent.additionalIntents,
       missingFields,
-      clarificationQuestion: `To add someone, what is ${label}?`,
+      clarificationQuestion: question,
     },
   };
 }

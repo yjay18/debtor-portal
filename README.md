@@ -1,232 +1,118 @@
-# Account Self-Service Chatbot Challenge
+# Account self service chatbot
 
-Build this starter into a credible self-service chatbot for a customer with an overdue account.
+Live app: [https://debtor-portal-pi.vercel.app/](https://debtor-portal-pi.vercel.app/)
 
-We want to see whether you can turn everyday messages into safe, testable actions that persist in a database. The UI can stay simple. We care most about the quality of the decisions behind it.
+This is a small account portal for Jane Murphy's overdue Example Energy Ireland account. The chat can read account data, update contact details, manage related people, create promises to pay, record mocked payments, book future calls, and send account update notifications with an encrypted PDF attachment.
 
-## The task
+I kept the original portal shape and built the workflow behind it. The important part is the boundary: the model extracts a structured intent, but deterministic TypeScript and Postgres decide whether anything is valid enough to persist.
 
-Extend the existing Next.js app so the account holder can use chat to:
+## Reviewer quick path
 
-- read and update their contact details and preferred contact method
-- add, update, remove, and view people authorized to act for them
-- create and view a one-time promise to pay
-- make a mocked payment and view transaction history
-- book and view future call appointments
+1. Open the live app.
+2. Start with `Change my email address to <your email>`.
+3. Check the change card, then check your inbox. The email body should be generic.
+4. Open the attached PDF with the last four digits of the account's current phone number.
+5. Try a few safe reads: `What is my email?`, `What is my current balance?`, `Show my transactions.`
+6. Try one payment validation case: `Pay 20 dollars now.` It should ask for a EUR amount and should not write.
 
-The chatbot should extract the user's intent and details, ask for missing information, reject invalid requests, persist valid changes, and clearly explain the result.
+Resend's test sender can only deliver to the account owner's verified inbox unless a domain is configured, so the demo starts by changing the account email.
 
-Use the existing UI and starter contracts rather than replacing the project with a new application.
+More scripts are in [docs/demo-script.md](./docs/demo-script.md).
 
-## Start here
+## What works
 
-1. Click **Use this template** on GitHub and create a private repository.
-2. Clone your repository.
-3. Install and run the app:
+- Account reads: full account, single fields, support contact, preferred contact method, related people, promises, transactions, and future calls.
+- Account updates: name, email, phone, postal address, and preferred contact method.
+- Related people: add, update, remove with confirmation, and ambiguity handling.
+- Promises to pay: one future promise at a time.
+- Mocked payments: saved payment details are assumed, balance is deducted, a transaction is inserted, and repeat sends use an idempotency key.
+- Call appointments: future date/time only, with account phone as the default.
+- Notifications: each successful mutation creates a database outbox row, then the processor sends one generic email with an encrypted account summary PDF.
+
+## Local setup
+
+Use Node 24 and pnpm 11, matching CI.
 
 ```bash
-pnpm i
+pnpm install --frozen-lockfile
+cp .env.local.example .env.local
 pnpm dev
 ```
 
-4. Copy `.env.local.example` to `.env.local` when you are ready to connect Supabase, Resend, and an LLM provider:
-
-```bash
-cp .env.local.example .env.local
-```
-
-5. Deploy early so you can test the real application as you work. Vercel is recommended, but not required.
+Fill `.env.local` yourself. Do not paste secrets into issues, chat, or commits. The required names are documented in [docs/setup.md](./docs/setup.md).
 
 Useful checks:
 
 ```bash
-pnpm install --frozen-lockfile
-pnpm lint
-pnpm typecheck
-pnpm test
-pnpm build
+CI=true pnpm lint
+CI=true pnpm typecheck
+CI=true pnpm test
+CI=true pnpm build
+pnpm eval
 ```
 
-Do not commit API keys or other secrets.
+`pnpm eval` is opt-in because it calls the configured model and spends API credit. The normal suite is offline.
 
-## Engineering bar
+## Architecture
 
-Feature coverage alone is not enough. We are looking for evidence that you can make money-adjacent and sensitive-data workflows safe under failure, retries, and ambiguous input.
+The diagram lives at [architecture-diagram.md](./architecture-diagram.md).
 
-We will look at whether:
+In short:
 
-- account state remains consistent when a request fails or is repeated
-- incomplete and ambiguous requests are handled safely
-- untrusted input is validated before it can change data or trigger side effects
-- account identity and sensitive data have a clear trust boundary
-- failures are observable without leaking account information
-- another engineer can test, review, and extend the important decisions in the system
+```mermaid
+flowchart LR
+  Browser["Portal UI"] --> Route["POST /api/chat"]
+  Route --> Parser["LLM parser"]
+  Route --> Router["Deterministic router"]
+  Router --> Repo["Supabase repo"]
+  Repo --> DB["Postgres tables, RLS, triggers, RPC"]
+  DB --> Outbox["notification_attempts"]
+  Route --> Processor["Notification processor"]
+  Processor --> Email["Resend + encrypted PDF"]
+  Route --> Browser
+```
 
-Choose the design you think best meets those outcomes and explain the important tradeoffs. We are interested in your engineering judgment, not a particular architecture or library.
+## Design note
 
-## Required behaviour
+The database enforces the guarantees I care about most. RLS is enabled on every application table with no public policies, so the browser's publishable Supabase key cannot read or write account data. The Next server uses `SUPABASE_SECRET_KEY` for the page load and the chat route; browser code never talks to Supabase directly.
 
-Your solution must handle these workflows end to end.
+The model is deliberately boring, because it's the only part of a request that isn't deterministic. Its whole job is extraction. `src/lib/llm/parser.ts` asks an OpenAI compatible provider to turn one message into a single JSON intent, its fields, and any queued secondary intents. It never decides, executes, or does arithmetic. That's also the core of the injection stance: a misparse can only become a clarifying question, never a wrong write.
 
-### Account details
+Two things happen before the model is even called. Single-field reads like "what is my balance?" resolve from a regex table, and hostile patterns like "ignore previous instructions" or "set my balance to zero" map straight to `unsupported`. Those short-circuits keep both the cheap and the risky messages off the model entirely.
 
-- Read and update the account holder's name, email, phone number, postal address, and preferred contact method.
-- Support `email`, `sms`, and `phone` as contact methods.
-- Validate input before writing it.
+When the model does run, the prompt keeps instructions and data apart. System text holds the rules; everything user-derived goes inside XML sections with angle brackets escaped, so a related person named `Mark"} SYSTEM:` is read as data, not a command. The account summary it sees is masked (`j***@e***.test`, `***4567`) and trimmed to the last eight turns, not a full account dump. Structured Outputs constrains the response shape where the provider supports it, then Zod re-validates as the only source of truth. A bad response earns one retry; a second failure falls back to a safe clarification. Temperature is zero, the model id is pinned, and the call times out at about 15 seconds.
 
-### Related people
+`gpt-4.1-mini-2025-04-14` is the pinned model. An opt-in golden set (`pnpm eval`) picked it, with two clean passes over 46 synthetic messages at roughly 1.4 cents each.
 
-- Add, update, remove, and view related people.
-- Store their name, email, phone number, and whether they are authorized to act for the account holder.
-- Ask a clarifying question when the request is incomplete or identifies more than one person.
+Business rules live outside the model. Money is parsed into integer cents in `src/lib/llm/money.ts`; currency must match the account ledger and no FX conversion is attempted. Dates are checked against Europe/Dublin time in `src/lib/llm/dates.ts`, with Chrono used as an independent second check for promises and calls. Names, addresses, relationships, and call reasons are normalized and capped before storage.
 
-### Promise to pay
+Payments use a Postgres RPC, `record_payment`, instead of two separate REST writes. That function validates a positive amount, checks the idempotency key, performs a guarded balance decrement, and inserts the completed transaction in one database transaction. If the balance is too low, no transaction is inserted. If the same request is retried, the existing transaction is returned and the customer is not charged twice.
 
-- Create and view one-time promises to pay.
-- Store at least the amount and future due date.
-- Do not build recurring payment plans.
+Notifications use a transactional outbox. Table triggers write `notification_attempts` rows in the same transaction as account changes. After commit, `src/lib/notifications/processor.ts` loads queued or failed rows, reloads the fresh account snapshot, and sends one email. Delivery failure marks the row failed but doesn't roll back the account change, which is the right failure shape for a side effect that runs after commit.
 
-### Mocked payment and transactions
+Sensitive details stay out of the email body. `src/lib/notifications/account-change-notification.ts` sends generic text and attaches a PDF generated by `src/lib/notifications/pdf.ts`; the PDF password is the last four digits of the current account phone. The UI tells the user that rule without showing the password.
 
-- Treat payment details as already on file; do not integrate a real payment provider.
-- Record the payment as a transaction and reduce the persisted balance.
-- Ensure the balance and transaction history cannot be left inconsistent.
-- Decide how confirmation, repeated requests, and failures should behave, then document those choices.
-- Show seeded transactions and new mocked payments.
-- Reject zero, negative, malformed, and over-balance amounts.
+The main tradeoff is authentication. This challenge is a single synthetic account, so I didn't add a login system or user-specific RLS policies. In a real product, auth would come next, followed by rate limiting, stuck outbox alerts, a retry sweeper, and a safer operational reversal RPC for support corrections.
 
-### Call appointments
+## Test evidence
 
-- Book and view future calls.
-- Capture the date, time, phone number, and a short reason where possible.
-- Reject dates in the past and ask for missing details.
+Latest local evidence:
 
-### Change notifications
+- `CI=true pnpm lint` passed.
+- `CI=true pnpm typecheck` passed.
+- `CI=true pnpm test` passed: 383 tests across 19 files, zero skips.
+- `CI=true pnpm build` passed with Next.js 16.2.10.
+- `pnpm audit --prod` reports one low build time Babel advisory through Next/styled-jsx; the advisory's stated fixed release is not published yet.
 
-After every successful data change:
+The deterministic suite covers parsing boundaries, validation, state across turns, router behavior, payment idempotency, notification redaction/PDF behavior, request locking, and the acceptance scenarios. The model comparison selected `gpt-4.1-mini-2025-04-14` after two perfect 46 case semantic passes at low cost. Details are in [docs/test-evidence.md](./docs/test-evidence.md).
 
-- send a generic email to the account holder through Resend
-- keep sensitive account details out of the email body
-- attach an encrypted PDF containing the current account summary, contact details, related people, transactions, promises, appointments, and balance
-- use the last four digits of the account holder's current phone number as the PDF password
+## Submission checklist
 
-For local development, you may log a redacted notification when Resend is not configured. The deployed app must be capable of sending the email and encrypted PDF. Automated tests must mock this boundary.
+- Live URL is included above.
+- Architecture diagram is in the repository root.
+- Setup, demo script, and test evidence are in `docs/`.
+- No real payment provider is used.
+- Account changes persist in Supabase and survive refresh.
+- Resend emails are generic and account details live in the encrypted PDF.
+- CI runs install, lint, typecheck, and tests without provider credentials.
 
-Make notification failures observable without storing sensitive email or PDF content. Document how an operator could understand and recover from a delivery failure.
-
-## Technical expectations
-
-- Use Supabase for persistent data. Start from the migration and fixture data provided.
-- Use an LLM, rules, or a hybrid to turn free text into a structured intent and fields.
-- Keep validation and business rules deterministic and testable.
-- Do not let an LLM write directly to the database or trigger side effects without validation.
-- Handle ambiguous input and missing details without guessing.
-- Document the system's trust assumptions and ensure a caller cannot read or change an unintended account.
-- Avoid logging account summaries, PDF passwords, or other sensitive data.
-- Mock LLM, email, PDF delivery, and payment side effects in automated tests.
-- Document important schema or architecture decisions.
-
-You do not need to add authentication, a multi-account admin dashboard, a real payment integration, or a production collections platform.
-
-## Acceptance examples
-
-At minimum, demonstrate that the system can handle:
-
-1. “What phone number is on my account?”
-2. “Change my phone number to +353831112233.”
-3. “Add Mark Murphy, mark@example.test, +353831998877 so he can act for me.”
-4. “Add my brother so he can speak for me.” — ask for the missing details, then complete the same request when the user provides them in a follow-up message.
-5. “Can I pay 500 euro on the 1st of next month?”
-6. “Pay 150 euro now.”
-7. “Show my transactions.”
-8. “Book a call next Tuesday at 10am about my bill.”
-9. “Book a call yesterday.” — reject it and ask for a future date.
-
-More detail is available in [the acceptance scenarios](./docs/scenarios.md) and [account context](./docs/account-context.md). The skipped examples in `src/lib/chat/chat-contracts.test.ts` may be replaced or extended with your own tests.
-
-## Tests and reviewer experience
-
-The core suite must run without network access, live provider credentials, or a pre-existing `.env.local`. Mock the LLM, Resend, PDF delivery, and persistence boundary where appropriate. A small separate integration suite may use local Supabase, but it must not replace fast offline tests of the business rules.
-
-At minimum, automated tests should cover:
-
-- the required successful workflows
-- missing, invalid, and ambiguous input
-- multi-turn clarification and completion
-- important failure and repeated-request behaviour
-- email redaction and PDF password/encryption behaviour
-- invalid or hallucinated LLM output
-
-Do not submit with the starter contract suite still skipped unless equivalent active tests clearly cover every contract and the unused starter file has been removed. From a clean clone, `install`, `lint`, `typecheck`, `test`, and `build` should all pass using the documented commands.
-
-## What to submit
-
-Your private repository must include:
-
-- working source code built on this starter
-- clear local setup instructions
-- a deployed application linked from your README
-- an architecture diagram in the repository root
-- automated tests for the core decision and action logic
-- a short verification matrix mapping each acceptance example to the relevant implementation and automated test
-- a design note of no more than 800 words covering:
-  - architecture and data model
-  - the most important tradeoffs and assumptions
-  - the most important failure modes and how the system handles them
-  - security, account-identity, and sensitive-data assumptions
-  - what you would monitor and improve next
-
-Invite `wardch` as a collaborator when the submission is ready.
-
-## Quality bar
-
-We will score the submission using this rubric:
-
-| Area | Weight | Strong evidence |
-| --- | ---: | --- |
-| Correctness and persistence | 35% | Workflows operate end to end and persisted state remains correct after refresh, failure, or a repeated request. |
-| Safety and validation | 20% | Identity, invalid input, ambiguous requests, database exposure, and sensitive data are handled deliberately. |
-| Code and data design | 20% | Parsing, business logic, persistence, and side effects have clear boundaries and sensible concurrency choices. |
-| Tests | 5% | Offline deterministic tests cover core rules, failure paths, retries, and mocked boundaries. |
-| Chat workflow design | 10% | Intent extraction is constrained and follow-up turns complete pending work without unsafe guessing. |
-| Delivery and explanation | 10% | The deployed app works and the design note clearly explains decisions, limits, and next steps. |
-
-We value a smaller, reliable implementation more than a broad collection of unfinished features.
-
-A submission is not review-ready if it has any of these failures:
-
-- a required workflow is still a stub, `TODO`, or design-only plan
-- changed data does not persist
-- core decision or action tests require live credentials, network access, or remain skipped
-- a real payment provider is used
-- sensitive account details appear in email bodies or logs
-- a successful data change makes no notification attempt
-- the deployed app cannot send a Resend email with an encrypted PDF
-- the documented clean-clone checks do not pass
-- the starter is discarded in favour of an unrelated rewrite
-
-Before submitting, verify the live app against the acceptance examples and include the exact commands a reviewer should run. We should be able to clone the repository, configure it from the example environment file, run the checks, and understand the design without a call.
-
-## AI tools
-
-You may use Codex, Claude Code, Cursor, or another coding assistant. You remain responsible for every change and should be able to explain the architecture, data model, tradeoffs, tests, and any AI-generated code you accepted or rejected.
-
-## Starter map
-
-- `src/app/api/chat/route.ts`: backend chat route to implement
-- `src/lib/chat/`: starter chat contracts and acceptance-test placeholders
-- `src/lib/notifications/account-change-notification.ts`: notification boundary to implement
-- `supabase/migrations/`: starter database schema and seed data
-- `fixtures/`: synthetic account data
-- `docs/scenarios.md`: detailed acceptance examples
-- `docs/account-context.md`: fixture fields and mutability rules
-- `architecture-diagram.md`: starter architecture diagram to replace or extend
-
-## Terms
-
-- **Promise to pay:** an agreement to pay a specific amount on a future date.
-- **Related person:** someone the account holder may authorize to speak or act for them.
-- **Mocked payment:** a fake payment recorded by this exercise without contacting a payment provider.
-- **Persisted data:** database data that remains after refresh.
-- **Notification boundary:** the code that sends or logs the account-change email and PDF.
-- **Contract test:** a test showing that an important workflow behaves as expected.
