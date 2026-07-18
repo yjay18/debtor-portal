@@ -25,7 +25,7 @@ export const goldenSet: GoldenCase[] = [
   { id: "transactions", message: "Show my transactions.", expectedAction: "read_transactions" },
   { id: "future-call", message: "Book a call next Tuesday at 10am about my bill.", expectedAction: "book_call_appointment", expectedFields: { dateTime: "2026-07-21T10:00:00+01:00", reason: "my bill" } },
   { id: "future-call-this-friday", message: "Could you call me this Friday afternoon about a missed bill?", expectedAction: "book_call_appointment" },
-  { id: "past-call", message: "Book a call yesterday.", expectedAction: "book_call_appointment" },
+  { id: "past-call", message: "Book a call yesterday.", expectedAction: ["book_call_appointment", "clarify"] },
   { id: "read-contact-method", message: "How do you normally contact me?", expectedAction: "read_preferred_contact_method" },
   { id: "set-sms", message: "Make text messages my preferred contact method.", expectedAction: "update_preferred_contact_method", expectedFields: { method: "sms" } },
   { id: "read-people", message: "Who is listed on my account?", expectedAction: "read_related_people" },

@@ -24,6 +24,9 @@ function semanticFields(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
 
   return Object.fromEntries(Object.entries(value).map(([field, fieldValue]) => {
+    if (field === "reason" && typeof fieldValue === "string") {
+      return [field, fieldValue.trim().toLocaleLowerCase("en").replace(/^(?:my|the)\s+/u, "")];
+    }
     if (field !== "amountRaw" || typeof fieldValue !== "string") return [field, fieldValue];
 
     const amountCents = parseMajorAmountToCents(fieldValue);

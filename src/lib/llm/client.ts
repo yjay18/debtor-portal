@@ -24,7 +24,7 @@ export type LlmClientConfig = {
   model: string;
   apiKey?: string;
   supportsJsonSchema: boolean;
-  reasoningEffort?: "minimal";
+  reasoningEffort?: "minimal" | "none";
   timeoutMs?: number;
 };
 
@@ -126,14 +126,19 @@ export function createLlmClient(
   }
   const isLocal = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
   if (!isLocal && !apiKey) throw new LlmClientError("Missing OPENAI_API_KEY.");
-  const usesOpenAiGpt5Parameters =
-    hostname === "api.openai.com" && /^gpt-5(?:-|$)/.test(model);
+  const reasoningEffort = hostname !== "api.openai.com"
+    ? undefined
+    : /^gpt-5\.\d+(?:-|$)/.test(model)
+      ? "none" as const
+      : /^gpt-5(?:-|$)/.test(model)
+        ? "minimal" as const
+        : undefined;
 
   return new OpenAiCompatibleClient({
     baseUrl,
     model,
     apiKey,
     supportsJsonSchema: env.LLM_SUPPORTS_JSON_SCHEMA !== "false",
-    ...(usesOpenAiGpt5Parameters ? { reasoningEffort: "minimal" } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   }, fetcher);
 }

@@ -72,6 +72,20 @@ it("uses minimal reasoning instead of unsupported temperature for OpenAI GPT-5",
   expect(body).not.toHaveProperty("temperature");
 });
 
+it("uses no reasoning instead of temperature for current versioned GPT-5 models", async () => {
+  const fetcher = vi.fn().mockResolvedValue(providerResponse("{}"));
+  const client = createLlmClient({
+    LLM_BASE_URL: "https://api.openai.com/v1",
+    LLM_MODEL: "gpt-5.4-nano-2026-03-17",
+    OPENAI_API_KEY: "test-api-key",
+  }, fetcher);
+
+  await client.completeJson(messages);
+  const body = JSON.parse(fetcher.mock.calls[0][1].body);
+  expect(body).toMatchObject({ reasoning_effort: "none" });
+  expect(body).not.toHaveProperty("temperature");
+});
+
 it.each([
   { name: "missing base URL", env: { LLM_MODEL: "model" }, message: "Missing LLM_BASE_URL or LLM_MODEL." },
   { name: "missing model", env: { LLM_BASE_URL: "https://api.openai.test/v1" }, message: "Missing LLM_BASE_URL or LLM_MODEL." },
