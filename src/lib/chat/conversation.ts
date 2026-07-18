@@ -209,7 +209,7 @@ export class ConversationStore {
 
   async addMessage(input: NewChatMessage): Promise<PersistedChatMessage> {
     const message = newMessageSchema.parse(input);
-    const insertRow = message.role === "account_holder"
+    const insertRow: Omit<ChatMessageRow, "id" | "created_at"> = message.role === "account_holder"
       ? {
           conversation_id: message.conversationId,
           role: message.role,

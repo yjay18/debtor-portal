@@ -3,6 +3,8 @@ allowBuilds:
   msw: true
   sharp: true
   unrs-resolver: true
+overrides:
+  postcss: 8.5.16
 onlyBuiltDependencies:
   - msw
   - sharp
