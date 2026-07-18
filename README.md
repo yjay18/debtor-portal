@@ -6,18 +6,6 @@ This is a small account portal for Jane Murphy's overdue Example Energy Ireland 
 
 I kept the original portal shape and built the workflow behind it. The important part is the boundary: the model extracts a structured intent, but deterministic TypeScript and Postgres decide whether anything is valid enough to persist.
 
-## Reviewer quick path
-
-1. Open the live app.
-2. Start with `Change my email address to <your email>`.
-3. Check the change card, then check your inbox. The email body should be generic.
-4. Open the attached PDF with the last four digits of the account's current phone number.
-5. Try a few safe reads: `What is my email?`, `What is my current balance?`, `Show my transactions.`
-6. Try one payment validation case: `Pay 20 dollars now.` It should ask for a EUR amount and should not write.
-
-Resend's test sender can only deliver to the account owner's verified inbox unless a domain is configured, so the demo starts by changing the account email.
-
-More scripts are in [docs/demo-script.md](./docs/demo-script.md).
 
 ## What works
 
@@ -80,19 +68,19 @@ The model is deliberately boring, because it's the only part of a request that i
 
 Two things happen before the model is even called. Single-field reads like "what is my balance?" resolve from a regex table, and hostile patterns like "ignore previous instructions" or "set my balance to zero" map straight to `unsupported`. Those short-circuits keep both the cheap and the risky messages off the model entirely.
 
-When the model does run, the prompt keeps instructions and data apart. System text holds the rules; everything user-derived goes inside XML sections with angle brackets escaped, so a related person named `Mark"} SYSTEM:` is read as data, not a command. The account summary it sees is masked (`j***@e***.test`, `***4567`) and trimmed to the last eight turns, not a full account dump. Structured Outputs constrains the response shape where the provider supports it, then Zod re-validates as the only source of truth. A bad response earns one retry; a second failure falls back to a safe clarification. Temperature is zero, the model id is pinned, and the call times out at about 15 seconds.
+When the model does run, the prompt keeps instructions and data apart. System text holds the rules in which everything user-derived goes inside XML sections with angle brackets escaped, so a related person named `Mark"} SYSTEM:` is read as data, not a command. The account summary it sees is masked (`j***@e***.test`, `***4567`) and trimmed to the last eight turns, not a full account dump. Structured Outputs constrains the response shape where the provider supports it, then Zod re-validates as the only source of truth. A bad response earns one retry; a second failure falls back to a safe clarification. Temperature is zero, the model id is pinned, and the call times out at about 15 seconds.
 
 `gpt-4.1-mini-2025-04-14` is the pinned model. An opt-in golden set (`pnpm eval`) picked it, with two clean passes over 46 synthetic messages at roughly 1.4 cents each.
 
-Business rules live outside the model. Money is parsed into integer cents in `src/lib/llm/money.ts`; currency must match the account ledger and no FX conversion is attempted. Dates are checked against Europe/Dublin time in `src/lib/llm/dates.ts`, with Chrono used as an independent second check for promises and calls. Names, addresses, relationships, and call reasons are normalized and capped before storage.
+Business rules live outside the model. Money is parsed into integer cents in `src/lib/llm/money.ts`; currency must match the account ledger and no FX conversion is attempted (out of scope for this problem). Dates are checked against Europe/Dublin time in `src/lib/llm/dates.ts`, with Chrono used as an independent second check for promises and calls. Names, addresses, relationships, and call reasons are normalized and capped before storage.
 
 Payments use a Postgres RPC, `record_payment`, instead of two separate REST writes. That function validates a positive amount, checks the idempotency key, performs a guarded balance decrement, and inserts the completed transaction in one database transaction. If the balance is too low, no transaction is inserted. If the same request is retried, the existing transaction is returned and the customer is not charged twice.
 
-Notifications use a transactional outbox. Table triggers write `notification_attempts` rows in the same transaction as account changes. After commit, `src/lib/notifications/processor.ts` loads queued or failed rows, reloads the fresh account snapshot, and sends one email. Delivery failure marks the row failed but doesn't roll back the account change, which is the right failure shape for a side effect that runs after commit.
+Notifications use a transactional outbox. Table triggers write `notification_attempts` rows in the same transaction as account changes. After commit, `src/lib/notifications/processor.ts` loads queued or failed rows, reloads the fresh account snapshot, and sends one email. Delivery failure marks the row failed but doesn't roll back the account change to avoid miscrepencies in the account itself.
 
-Sensitive details stay out of the email body. `src/lib/notifications/account-change-notification.ts` sends generic text and attaches a PDF generated by `src/lib/notifications/pdf.ts`; the PDF password is the last four digits of the current account phone. The UI tells the user that rule without showing the password.
+Sensitive details stay out of the email body. `src/lib/notifications/account-change-notification.ts` sends generic text and attaches a PDF generated by `src/lib/notifications/pdf.ts`. The PDF password is the last four digits of the current account phone.
 
-The main tradeoff is authentication. This challenge is a single synthetic account, so I didn't add a login system or user-specific RLS policies. In a real product, auth would come next, followed by rate limiting, stuck outbox alerts, a retry sweeper, and a safer operational reversal RPC for support corrections.
+The main tradeoff is that the models act as deterministic nodes, without being able to perform actions and only work as a parsing call for complex/fuzzy chat prompts to the model. So the model loses out on its output variance, personality, customer comfortableness. However, I believe that security of bank details is far more important than that.
 
 ## Test evidence
 

@@ -1,0 +1,185 @@
+{
+  "evaluatedAt": "2026-07-18T12:28:36.032Z",
+  "syntheticOnly": true,
+  "pricingUnit": "USD per 1M tokens",
+  "firstPass": [
+    {
+      "pass": 1,
+      "model": "gpt-5-nano-2025-08-07",
+      "label": "GPT-5 Nano baseline",
+      "caseCount": 46,
+      "intentMatches": 46,
+      "fieldCases": 24,
+      "exactFieldMatches": 17,
+      "semanticFieldMatches": 22,
+      "productFailureCount": 2,
+      "failureIds": [
+        "update-person",
+        "future-call"
+      ],
+      "requests": 45,
+      "statuses": {
+        "200": 45
+      },
+      "promptTokens": 88610,
+      "cachedTokens": 73472,
+      "completionTokens": 2940,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1430,
+      "p95LatencyMs": 1845,
+      "estimatedCostUsd": 0.0023
+    },
+    {
+      "pass": 1,
+      "model": "gpt-5.4-nano-2026-03-17",
+      "label": "GPT-5.4 Nano",
+      "caseCount": 46,
+      "intentMatches": 44,
+      "fieldCases": 24,
+      "exactFieldMatches": 18,
+      "semanticFieldMatches": 22,
+      "productFailureCount": 4,
+      "failureIds": [
+        "add-authorized-person",
+        "missing-call",
+        "related-person-literal-relationship",
+        "promise-end-next-month"
+      ],
+      "requests": 45,
+      "statuses": {
+        "200": 45
+      },
+      "promptTokens": 88612,
+      "cachedTokens": 71680,
+      "completionTokens": 2965,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1280,
+      "p95LatencyMs": 1638,
+      "estimatedCostUsd": 0.008526
+    },
+    {
+      "pass": 1,
+      "model": "gpt-4o-mini-2024-07-18",
+      "label": "GPT-4o Mini",
+      "caseCount": 46,
+      "intentMatches": 44,
+      "fieldCases": 24,
+      "exactFieldMatches": 20,
+      "semanticFieldMatches": 20,
+      "productFailureCount": 4,
+      "failureIds": [
+        "update-person",
+        "future-call",
+        "multi-intent",
+        "related-person-literal-relationship"
+      ],
+      "requests": 44,
+      "statuses": {
+        "200": 44
+      },
+      "promptTokens": 86837,
+      "cachedTokens": 80640,
+      "completionTokens": 1921,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1229,
+      "p95LatencyMs": 1635,
+      "estimatedCostUsd": 0.00813
+    },
+    {
+      "pass": 1,
+      "model": "gpt-4.1-mini-2025-04-14",
+      "label": "GPT-4.1 Mini",
+      "caseCount": 46,
+      "intentMatches": 46,
+      "fieldCases": 24,
+      "exactFieldMatches": 23,
+      "semanticFieldMatches": 24,
+      "productFailureCount": 0,
+      "failureIds": [],
+      "requests": 44,
+      "statuses": {
+        "200": 44
+      },
+      "promptTokens": 86837,
+      "cachedTokens": 78848,
+      "completionTokens": 1949,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1356,
+      "p95LatencyMs": 1941,
+      "estimatedCostUsd": 0.014199
+    },
+    {
+      "pass": 1,
+      "model": "gpt-5.4-mini-2026-03-17",
+      "label": "GPT-5.4 Mini ceiling",
+      "caseCount": 46,
+      "intentMatches": 46,
+      "fieldCases": 24,
+      "exactFieldMatches": 23,
+      "semanticFieldMatches": 24,
+      "productFailureCount": 0,
+      "failureIds": [],
+      "requests": 44,
+      "statuses": {
+        "200": 44
+      },
+      "promptTokens": 86617,
+      "cachedTokens": 78848,
+      "completionTokens": 2383,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1126,
+      "p95LatencyMs": 2355,
+      "estimatedCostUsd": 0.022464
+    }
+  ],
+  "stabilityPass": [
+    {
+      "pass": 2,
+      "model": "gpt-4.1-mini-2025-04-14",
+      "label": "GPT-4.1 Mini",
+      "caseCount": 46,
+      "intentMatches": 46,
+      "fieldCases": 24,
+      "exactFieldMatches": 23,
+      "semanticFieldMatches": 24,
+      "productFailureCount": 0,
+      "failureIds": [],
+      "requests": 44,
+      "statuses": {
+        "200": 44
+      },
+      "promptTokens": 86837,
+      "cachedTokens": 78848,
+      "completionTokens": 1936,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1259,
+      "p95LatencyMs": 2257,
+      "estimatedCostUsd": 0.014178
+    },
+    {
+      "pass": 2,
+      "model": "gpt-5.4-mini-2026-03-17",
+      "label": "GPT-5.4 Mini ceiling",
+      "caseCount": 46,
+      "intentMatches": 45,
+      "fieldCases": 24,
+      "exactFieldMatches": 23,
+      "semanticFieldMatches": 24,
+      "productFailureCount": 1,
+      "failureIds": [
+        "promise-ambiguous-numeric-date"
+      ],
+      "requests": 44,
+      "statuses": {
+        "200": 44
+      },
+      "promptTokens": 86617,
+      "cachedTokens": 78848,
+      "completionTokens": 2372,
+      "reasoningTokens": 0,
+      "medianLatencyMs": 1025,
+      "p95LatencyMs": 1433,
+      "estimatedCostUsd": 0.022414
+    }
+  ]
+}

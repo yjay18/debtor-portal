@@ -39,7 +39,7 @@ yarn-error.log*
 # AI working files (not submission artifacts)
 AGENTS.md
 docs/context/
-eval/output/
+eval/output/latest.json
 scratch/
 
 # generated sensitive artifacts

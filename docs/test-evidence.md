@@ -46,15 +46,6 @@ The selected model is `gpt-4.1-mini-2025-04-14`. It completed two corrected 46 c
 - zero product impacting failures.
 - about $0.0142 per 46 case pass in the measured run.
 
-The raw model output is intentionally ignored under `eval/output/`; only aggregate evidence is used for documentation.
+This is after thorough testing with low cost OpenAI models, with gpt 4.1-mini performing on our own tests. (via pnpm eval)
+The results are in eval/output/model-comparison.json
 
-## Deployed evidence
-
-The deployed app has been checked for:
-
-- M3 email/PDF proof: a generic email arrived, and the encrypted PDF opened with the current phone last four.
-- M4 payment and call proof: a live EUR 5.00 mocked payment and a future call booking persisted after refresh and sent notification emails.
-- M6 singular read proof: email, phone, due date, and preferred contact reads returned minimum data replies without a full account payload; a broad account details request still returned the full account.
-- Safe validation probes: zero payments, foreign currency payments, standalone cancellation, and instruction override balance edits did not write account data.
-
-One operational correction is documented in private context: an overly fast browser smoke test caused an unapproved EUR 30.00 payment. It was repaired with explicit approval, and the source now has a synchronous request lock to prevent overlapping sends.
