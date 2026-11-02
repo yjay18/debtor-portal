@@ -1,6 +1,8 @@
+Done as part of a coding interview to make a secure financial chatbot over the weekend.
+Deployment has been paused. Code made public
 # Account self service chatbot
 
-Live app: [https://debtor-portal-pi.vercel.app/](https://debtor-portal-pi.vercel.app/)
+Live app: [https://debtor-portal-pi.vercel.app/](https://debtor-portal-pi.vercel.app/) [DEPLOYMENT PAUSED]
 
 This is a small account portal for Jane Murphy's overdue Example Energy Ireland account. The chat can read account data, update contact details, manage related people, create promises to pay, record mocked payments, book future calls, and send account update notifications with an encrypted PDF attachment.
 
